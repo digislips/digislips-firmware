@@ -15,13 +15,20 @@
 //  Wiring:
 //    RS232 from POS  → MAX3232 → UART2  RX=GPIO16, TX=GPIO18 (TX unused)
 //    RS232 to Printer→ MAX3232 → UART1  RX=GPIO19 (unused), TX=GPIO17
-//    OLED (SSD1306)  → I2C  SDA=GPIO21, SCL=GPIO22
-//    NFC  (PN532)    → I2C  SDA=GPIO21, SCL=GPIO22  (shared bus)
+//    TFT (T035MA1S3N3) SPI:
+//      GND  → GND
+//      VCC  → 3.3V
+//      SDA  → GPIO23 (MOSI)
+//      SCL  → GPIO18 (SCLK)
+//      RS   → GPIO27  (DC)
+//      RES  → 3.3V
+//      CS   → GPIO15
+//      BL   → GPIO32
+//    NFC  (PN532)    → I2C  SDA=GPIO21, SCL=GPIO22
 //    Button          → GPIO4  (other leg to GND, internal pull-up used)
 //
 //  Libraries (install via Arduino Library Manager):
-//    Adafruit SSD1306        — OLED driver
-//    Adafruit GFX            — graphics primitives
+//    TFT_eSPI                — TFT display driver (configure User_Setup.h first)
 //    Adafruit PN532          — NFC reader
 //    QRCodeGenerator         — QR rendering
 //    ArduinoJson (v6)        — JSON building
@@ -34,8 +41,7 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
+#include <TFT_eSPI.h>
 #include <Adafruit_PN532.h>
 #include <QRCodeGenerator.h>
 #include <ArduinoJson.h>
@@ -57,8 +63,9 @@ const char* WIFI_PASSWORD  = "0836468891";
 #define SUPABASE_ANON  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVpdmN0cWppc29kZmhhaXR6eWlxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY4MDgxMjIsImV4cCI6MjA5MjM4NDEyMn0._0wu91Zrc3aMrKsO_KUkp64CoOCklwMViYAofYZyCFI"
 
 // Each physical device gets its own token — generated via provision_device() in Supabase
-// Replace this with the token generated when provisioning this unit
-#define DEVICE_TOKEN  "REPLACE_WITH_DEVICE_TOKEN"
+#define DEVICE_TOKEN   "92007b7839f6909c07965ac26bd080a673a5ae16b637b237ab63945af0e66431"
+#define DEVICE_ID      "c42353a3-f383-49ac-aef4-06d054056ae8"
+#define MERCHANT_ID    "0fa9f01d-c384-43df-9819-d1265c0ca556"
 
 // QR code base URL — phone app will open  https://digislips.co.za/slip/<slip_uuid>
 #define QR_BASE_URL  "https://digislips.co.za/slip/"
@@ -81,8 +88,8 @@ const char* WIFI_PASSWORD  = "0836468891";
 // =============================================================================
 
 #define UART2_RX    16   // from POS  (via MAX3232)
-#define UART2_TX    18   // not used
-#define UART1_RX    19   // not used
+#define UART2_TX    -1   // not used (GPIO18 now used by TFT SCK)
+#define UART1_RX    -1   // not used (GPIO19 now used by TFT MISO — unconnected)
 #define UART1_TX    17   // to Printer (via MAX3232)
 
 #define I2C_SDA     21
@@ -97,9 +104,17 @@ const char* WIFI_PASSWORD  = "0836468891";
 HardwareSerial posSerial(2);      // UART2 — from POS
 HardwareSerial printerSerial(1);  // UART1 — to Printer
 
-#define SCREEN_WIDTH  128
-#define SCREEN_HEIGHT  64
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+#define SCREEN_WIDTH  480
+#define SCREEN_HEIGHT 320
+TFT_eSPI tft = TFT_eSPI();
+
+// Colours
+#define COL_BG       0x0000   // Black
+#define COL_FG       0xFFFF   // White
+#define COL_ACCENT   0x07FF   // Cyan
+#define COL_SUCCESS  0x07E0   // Green
+#define COL_ERROR    0xF800   // Red
+#define COL_BAR      0x07FF   // Cyan progress bar
 
 Adafruit_PN532 nfc(I2C_SDA, I2C_SCL);
 
@@ -294,19 +309,30 @@ void wifiWatchdog() {
 }
 
 // =============================================================================
-//  ── OLED HELPERS ─────────────────────────────────────────────────────────────
+//  ── TFT HELPERS ──────────────────────────────────────────────────────────────
 // =============================================================================
 
 void displayMessage(const char* line1,
                     const char* line2 = "",
                     const char* line3 = "") {
-  display.clearDisplay();
-  display.setTextSize(1);
-  display.setTextColor(WHITE);
-  display.setCursor(0, 8);  display.println(line1);
-  if (strlen(line2) > 0) { display.setCursor(0, 26); display.println(line2); }
-  if (strlen(line3) > 0) { display.setCursor(0, 44); display.println(line3); }
-  display.display();
+  tft.fillScreen(COL_BG);
+  tft.setTextDatum(MC_DATUM);  // middle-centre alignment
+
+  tft.setTextColor(COL_ACCENT, COL_BG);
+  tft.setTextSize(3);
+  tft.drawString(line1, SCREEN_WIDTH / 2, 100);
+
+  if (strlen(line2) > 0) {
+    tft.setTextColor(COL_FG, COL_BG);
+    tft.setTextSize(2);
+    tft.drawString(line2, SCREEN_WIDTH / 2, 160);
+  }
+
+  if (strlen(line3) > 0) {
+    tft.setTextColor(COL_FG, COL_BG);
+    tft.setTextSize(2);
+    tft.drawString(line3, SCREEN_WIDTH / 2, 210);
+  }
 }
 
 // IDLE screen: time | WiFi status | last tx number | queue depth
@@ -314,56 +340,57 @@ void displayIdle() {
   if (millis() - lastIdleRefresh < 5000) return;  // refresh every 5s
   lastIdleRefresh = millis();
 
-  String timeStr   = getTimeHHMM();
-  String wifiStr   = (WiFi.status() == WL_CONNECTED) ? "WiFi: OK" : "WiFi: OFFLINE";
-  String txStr     = "TX #" + String(txCounter);
-  int    qDepth    = offlineQueueLen();
-  if (qDepth > 0) txStr += "  Q:" + String(qDepth);
+  String timeStr = getTimeHHMM();
+  String wifiStr = (WiFi.status() == WL_CONNECTED) ? "WiFi: OK" : "WiFi: OFFLINE";
+  String txStr   = "TX #" + String(txCounter);
+  int    qDepth  = offlineQueueLen();
+  if (qDepth > 0) txStr += "   Q:" + String(qDepth);
 
-  display.clearDisplay();
-  display.setTextColor(WHITE);
+  tft.fillScreen(COL_BG);
 
-  // Large clock
-  display.setTextSize(2);
-  display.setCursor(24, 4);
-  display.println(timeStr);
+  // Large clock centred at top
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(COL_ACCENT, COL_BG);
+  tft.setTextSize(6);
+  tft.drawString(timeStr, SCREEN_WIDTH / 2, 90);
 
   // Divider
-  display.drawFastHLine(0, 24, SCREEN_WIDTH, WHITE);
+  tft.drawFastHLine(20, 150, SCREEN_WIDTH - 40, COL_ACCENT);
 
   // Status lines
-  display.setTextSize(1);
-  display.setCursor(0, 30);
-  display.println(wifiStr);
-  display.setCursor(0, 42);
-  display.println(txStr);
-  display.setCursor(0, 54);
-  display.println("Ready for next sale");
-
-  display.display();
+  tft.setTextColor(COL_FG, COL_BG);
+  tft.setTextSize(2);
+  tft.drawString(wifiStr, SCREEN_WIDTH / 2, 185);
+  tft.drawString(txStr,   SCREEN_WIDTH / 2, 220);
+  tft.drawString("Ready for next sale", SCREEN_WIDTH / 2, 260);
 }
 
 void drawQR(const char* text) {
   QRCode qrcode;
-  uint8_t qrcodeData[qrcode_getBufferSize(3)];
-  qrcode_initText(&qrcode, qrcodeData, 3, 0, text);
+  uint8_t qrcodeData[qrcode_getBufferSize(5)];  // version 5 — bigger for longer URLs
+  qrcode_initText(&qrcode, qrcodeData, 5, 0, text);
 
   int size    = qrcode.size;
-  int scale   = 2;
+  int scale   = 6;  // 480px display — scale up for easy scanning
   int offsetX = (SCREEN_WIDTH  - size * scale) / 2;
-  int offsetY = (SCREEN_HEIGHT - size * scale) / 2;
+  int offsetY = (SCREEN_HEIGHT - size * scale) / 2 - 20;
 
-  display.clearDisplay();
+  tft.fillScreen(COL_FG);  // white background for QR
+
   for (int y = 0; y < size; y++) {
     for (int x = 0; x < size; x++) {
-      if (qrcode_getModule(&qrcode, x, y)) {
-        display.fillRect(offsetX + x * scale,
-                         offsetY + y * scale,
-                         scale, scale, WHITE);
-      }
+      uint16_t colour = qrcode_getModule(&qrcode, x, y) ? COL_BG : COL_FG;
+      tft.fillRect(offsetX + x * scale,
+                   offsetY + y * scale,
+                   scale, scale, colour);
     }
   }
-  display.display();
+
+  // "Scan to claim" hint at bottom
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(COL_BG, COL_FG);
+  tft.setTextSize(2);
+  tft.drawString("Scan or Tap to claim", SCREEN_WIDTH / 2, 300);
 }
 
 // Countdown bar drawn at the bottom of the QR screen
@@ -372,9 +399,8 @@ void drawClaimCountdown() {
   if (elapsed >= CLAIM_TIMEOUT_MS) return;
 
   int barWidth = map(elapsed, 0, CLAIM_TIMEOUT_MS, SCREEN_WIDTH, 0);
-  display.fillRect(0, 58, SCREEN_WIDTH, 6, BLACK);   // clear previous bar
-  display.fillRect(0, 58, barWidth,     6, WHITE);
-  display.display();
+  tft.fillRect(0, 310, SCREEN_WIDTH, 10, COL_BG);
+  tft.fillRect(0, 310, barWidth,     10, COL_BAR);
 }
 
 // =============================================================================
@@ -481,9 +507,10 @@ String buildSupabaseJSON(const String& timestamp) {
   rawText.replace("\"", "\\\"");
 
   DynamicJsonDocument doc(4096);
-  doc["device_token"] = DEVICE_TOKEN;
-  doc["raw_text"]     = rawText;
-  doc["created_at"]   = timestamp;
+  doc["device_id"]   = DEVICE_ID;    // UUID of this device in the devices table
+  doc["merchant_id"] = MERCHANT_ID;  // UUID of the merchant this device belongs to
+  doc["raw_text"]    = rawText;
+  doc["created_at"]  = timestamp;
 
   String output;
   serializeJson(doc, output);
@@ -636,15 +663,15 @@ void setup() {
   txCounter = loadTxCounter();
   Serial.println("[NVS] Transaction counter: " + String(txCounter));
 
-  // ── I2C + OLED ──────────────────────────────────────────────────────────────
-  Wire.begin(I2C_SDA, I2C_SCL);
+  // ── TFT display ─────────────────────────────────────────────────────────────
+  tft.init();
+  tft.setRotation(1);  // landscape
+  tft.fillScreen(COL_BG);
+  displayMessage("DigiSlip", "Booting...", "v2.0");
+  Serial.println("[TFT] OK");
 
-  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
-    Serial.println("[OLED] FAILED — halting");
-    while (true) delay(100);
-  }
-  displayMessage("DigiSlip", "Booting...", "v1.0");
-  Serial.println("[OLED] OK");
+  // ── I2C (NFC only now — OLED removed) ──────────────────────────────────────
+  Wire.begin(I2C_SDA, I2C_SCL);
 
   // ── NFC ─────────────────────────────────────────────────────────────────────
   nfc.begin();
@@ -660,8 +687,8 @@ void setup() {
   Serial.println("[NFC] OK");
 
   // ── Serial ports ────────────────────────────────────────────────────────────
-  posSerial.begin(9600,  SERIAL_8N1, UART2_RX, UART2_TX);
-  printerSerial.begin(19200, SERIAL_8N1, UART1_RX, UART1_TX);
+  posSerial.begin(9600,  SERIAL_8N1, UART2_RX, -1);    // RX only — TX unused (GPIO18 = TFT SCLK)
+  printerSerial.begin(19200, SERIAL_8N1, -1, UART1_TX); // TX only — RX unused
   Serial.println("[UART] POS RX and Printer TX initialised");
 
   // ── Button ──────────────────────────────────────────────────────────────────
@@ -788,14 +815,6 @@ void loop() {
           String qrURL = String(QR_BASE_URL) + slipId;
           Serial.println("[QR] " + qrURL);
           drawQR(qrURL.c_str());
-
-          // Overlay "Scan or Tap" hint at the bottom
-          display.fillRect(0, 56, SCREEN_WIDTH, 8, BLACK);
-          display.setTextSize(1);
-          display.setTextColor(WHITE);
-          display.setCursor(10, 56);
-          display.print("Scan / Tap / Button");
-          display.display();
 
         } else {
           // POST failed even though WiFi appeared up
