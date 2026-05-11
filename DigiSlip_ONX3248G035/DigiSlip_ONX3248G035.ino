@@ -537,28 +537,35 @@ String supabasePost(const String& json) {
 }
 
 // =============================================================================
-//  ── SUPABASE — PATCH (mark slip claimed via NFC) ─────────────────────────────
+//  ── SUPABASE — NFC claim (calls nfc-claim edge function) ─────────────────────
+//  Looks up the NFC card UID in nfc_cards, inserts a claims row for that user,
+//  and marks the slip as claimed — all server-side with service role access.
 // =============================================================================
 
-bool supabasePatch(const String& id, const String& uid) {
+bool supabaseNfcClaim(const String& slipId, const String& uid) {
   if (WiFi.status() != WL_CONNECTED) return false;
 
   WiFiClientSecure client;
   client.setInsecure();
 
   HTTPClient https;
-  String url = String(SUPABASE_URL) + "/rest/v1/slips?id=eq." + id;
+  String url = String(SUPABASE_URL) + "/functions/v1/nfc-claim";
 
   if (!https.begin(client, url)) return false;
 
-  https.addHeader("Content-Type",           "application/json");
-  https.addHeader("apikey",                  SUPABASE_ANON);
-  https.addHeader("Authorization",           "Bearer " + String(SUPABASE_ANON));
-  https.addHeader("X-HTTP-Method-Override", "PATCH");
+  https.addHeader("Content-Type",  "application/json");
+  https.addHeader("apikey",         SUPABASE_ANON);
+  https.addHeader("Authorization",  "Bearer " + String(SUPABASE_ANON));
+  https.addHeader("X-Device-Token", DEVICE_TOKEN);
 
-  String json = "{\"claimed\":true}";
+  DynamicJsonDocument doc(256);
+  doc["slip_id"] = slipId;
+  doc["uid"]     = uid;
+  String json;
+  serializeJson(doc, json);
+
   int code = https.POST(json);
-
+  Serial.println("[NFC] nfc-claim → " + String(code) + " " + https.getString());
   https.end();
   return (code >= 200 && code < 300);
 }
@@ -842,9 +849,9 @@ void loop() {
                        "Linking slip...");
 
         if (slipId.length() > 0) {
-          bool ok = supabasePatch(slipId, nfcUID);
-          Serial.println(ok ? "[NFC] Slip linked to UID"
-                            : "[NFC] PATCH failed — UID local only");
+          bool ok = supabaseNfcClaim(slipId, nfcUID);
+          Serial.println(ok ? "[NFC] Slip claimed via NFC card"
+                            : "[NFC] nfc-claim failed — slip not linked to user");
         }
 
         currentState = STATE_CLAIMED;
