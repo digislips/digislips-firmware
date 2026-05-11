@@ -324,21 +324,18 @@ void wifiWatchdog() {
 //  ── TFT HELPERS — ONX3248G035 (320×480 portrait, ST7796) ────────────────────
 // =============================================================================
 
-// Read first touch point from CST826. Returns false if no touch or I2C error.
-// Assumes rotation=0: x 0..319 left→right, y 0..479 top→bottom.
-// If screen appears rotated 180°, change setRotation(0) to setRotation(2)
-// and negate: x = 319 - x; y = 479 - y;
 bool readTouch(int16_t &x, int16_t &y) {
   Wire.beginTransmission(TOUCH_ADDR);
   Wire.write(0x00);
-  if (Wire.endTransmission(false) != 0) return false;
-  Wire.requestFrom((uint8_t)TOUCH_ADDR, (uint8_t)6);
-  if (Wire.available() < 6) return false;
-  uint8_t buf[6];
-  for (int i = 0; i < 6; i++) buf[i] = Wire.read();
-  if ((buf[1] & 0x0F) == 0) return false;
-  x = ((buf[2] & 0x0F) << 8) | buf[3];
-  y = ((buf[4] & 0x0F) << 8) | buf[5];
+  if (Wire.endTransmission(false) != 0) return false;  // false = repeated start
+  uint8_t n = Wire.requestFrom((uint8_t)TOUCH_ADDR, (uint8_t)7);
+  if (n < 7) { while (Wire.available()) Wire.read(); return false; }
+  uint8_t buf[7];
+  for (int i = 0; i < 7; i++) buf[i] = Wire.read();
+  // buf: [pad | gesture | count | xH | xL | yH | yL]
+  if (buf[2] == 0) return false;
+  x = ((uint16_t)(buf[3] & 0x0F) << 8) | buf[4];
+  y = ((uint16_t)(buf[5] & 0x0F) << 8) | buf[6];
   return true;
 }
 
@@ -732,8 +729,24 @@ void setup() {
   Serial.println("[TFT] OK — ST7796 320x480 portrait");
 
   // ── I2C — Grove I2C connector ───────────────────────────────────────────────
+  // Bus recovery before Wire.begin() frees any device holding SDA low
+  pinMode(I2C_SDA, INPUT_PULLUP);
+  pinMode(I2C_SCL, OUTPUT);
+  for (int i = 0; i < 9; i++) {
+    digitalWrite(I2C_SCL, HIGH); delayMicroseconds(5);
+    digitalWrite(I2C_SCL, LOW);  delayMicroseconds(5);
+  }
+  pinMode(I2C_SDA, OUTPUT);
+  digitalWrite(I2C_SDA, LOW);  delayMicroseconds(5);
+  digitalWrite(I2C_SCL, HIGH); delayMicroseconds(5);
+  digitalWrite(I2C_SDA, HIGH); delayMicroseconds(5);
+  pinMode(I2C_SCL, INPUT_PULLUP);
+  pinMode(I2C_SDA, INPUT_PULLUP);
+  delay(10);
+
   Wire.begin(I2C_SDA, I2C_SCL);
-  Serial.println("[I2C] SDA=IO8 SCL=IO7");
+  Wire.setClock(400000);
+  Serial.println("[I2C] SDA=IO8 SCL=IO7 @ 400kHz");
 
   // ── NFC ─────────────────────────────────────────────────────────────────────
   nfc.begin();
