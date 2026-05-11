@@ -1,5 +1,5 @@
 // =============================================================================
-//  DigiSlip — ONX3248G035 (ESP32-S3, 3.5" ST7796, 320×480)
+//  DigiSlip — ONX3248G035 (ESP32-S3, 3.5" ST7796, 320×480 portrait)
 //
 //  What this device does:
 //    • Sits between a POS machine and a thermal printer on RS232
@@ -9,12 +9,13 @@
 //    • Reads NFC card/phone UID to link slip to a user account
 //    • Polls Supabase to detect QR-based claims (iPhone users via app)
 //    • If claimed digitally → print is blocked (green flow)
-//    • If not claimed within 60s → customer may press button for paper slip
+//    • Touch buttons: Print (forward to printer) / Cancel (discard)
+//    • If neither tapped within 60s → device returns to IDLE (no print)
 //    • Offline queue: if WiFi down, stores up to 5 transactions in NVS
 //
 //  Board: ONX3248G035 (Nextion Genius Series)
 //    MCU:     ESP32-S3R8 (8MB PSRAM, 16MB Flash)
-//    Display: 3.5" ST7796, 320×480, capacitive touch (CST826)
+//    Display: 3.5" IPS, ST7796 driver, 320×480, capacitive touch (CST826)
 //
 //  Wiring (external peripherals only — TFT is internal to board):
 //    RS232 from POS   → MAX3232 → UART1 Grove connector → IO12 (RX)
@@ -26,8 +27,7 @@
 //    #define ST7796_DRIVER
 //    #define TFT_WIDTH  320
 //    #define TFT_HEIGHT 480
-//    (SPI pins are internal — let the board BSP handle them,
-//     or use the Nextion example User_Setup.h from their GitHub)
+//    (SPI pins are internal — let the board BSP handle them)
 //
 //  Libraries (install via Arduino Library Manager):
 //    TFT_eSPI                — TFT display driver (configure User_Setup.h first)
@@ -110,19 +110,34 @@ const char* WIFI_PASSWORD  = "0836468891";
 // UART1 — used for both POS RX and Printer TX (Grove connector)
 HardwareSerial posSerial(1);
 
-// Screen: ST7796, 320×480 portrait native, used landscape = 480×320
-// TFT_eSPI is configured via User_Setup.h — internal SPI to board display
-#define SCREEN_WIDTH  480   // landscape width
-#define SCREEN_HEIGHT 320   // landscape height
+// Screen: ST7796, 320×480 portrait
+#define SCREEN_WIDTH  320
+#define SCREEN_HEIGHT 480
 TFT_eSPI tft = TFT_eSPI();
 
-// Colours (RGB565)
-#define COL_BG       0x0000   // Black
-#define COL_FG       0xFFFF   // White
-#define COL_ACCENT   0x07FF   // Cyan
-#define COL_SUCCESS  0x07E0   // Green
-#define COL_ERROR    0xF800   // Red
-#define COL_BAR      0x07FF   // Cyan progress bar
+// Colours (RGB565) — DigiSlip brand palette (digislip-app/src/constants/theme.ts)
+#define COL_BG       0xEF3B   // #E8E4DA warm page
+#define COL_CARD     0xFFFF   // #FEFDFB off-white
+#define COL_FG       0x18C2   // #1C1917 dark text
+#define COL_ACCENT   0x12DF   // #1558FF brand blue
+#define COL_SUCCESS  0x064D   // #00C96A brand green
+#define COL_ERROR    0xD924   // #DC2626 red
+#define COL_MUTED    0x7B8D   // #78716C grey
+#define COL_FAINT    0xD699   // #D6D3CD faint
+#define COL_ON_GREEN 0x08E2   // #0D1F14 dark text on green buttons
+
+// Touch — CST826 capacitive controller on internal I2C bus
+#define TOUCH_ADDR   0x15
+
+// QR screen button geometry — shared between drawQR() and loop() hit-test
+#define BTN_PRINT_X   40
+#define BTN_PRINT_Y   356
+#define BTN_PRINT_W   240
+#define BTN_PRINT_H   48
+#define BTN_CANCEL_X  70
+#define BTN_CANCEL_Y  414
+#define BTN_CANCEL_W  180
+#define BTN_CANCEL_H  38
 
 // NFC reader on I2C Grove connector
 Adafruit_PN532 nfc(I2C_SDA, I2C_SCL);
@@ -189,7 +204,7 @@ bool offlineQueuePush(const String& json) {
   int n = prefs.getInt("qlen", 0);
   if (n >= OFFLINE_QUEUE_SIZE) {
     prefs.end();
-    Serial.println("[Queue] Full — dropping oldest entry");
+    Serial.println("[Queue] Full — dropping oldest");
     prefs.begin("queue", false);
     for (int i = 0; i < OFFLINE_QUEUE_SIZE - 1; i++) {
       String val = prefs.getString(("q" + String(i + 1)).c_str(), "");
@@ -200,7 +215,7 @@ bool offlineQueuePush(const String& json) {
   prefs.putString(("q" + String(n)).c_str(), json);
   prefs.putInt("qlen", n + 1);
   prefs.end();
-  Serial.println("[Queue] Stored offline. Queue depth: " + String(n + 1));
+  Serial.println("[Queue] Stored. Depth: " + String(n + 1));
   return true;
 }
 
@@ -299,36 +314,64 @@ void wifiWatchdog() {
   if (millis() - lastWifiCheck < WIFI_WATCHDOG_MS) return;
   lastWifiCheck = millis();
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("[WiFi] Connection lost — reconnecting...");
+    Serial.println("[WiFi] Lost — reconnecting");
     WiFi.disconnect();
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   }
 }
 
 // =============================================================================
-//  ── TFT HELPERS — ONX3248G035 (480×320 landscape, ST7796) ───────────────────
+//  ── TFT HELPERS — ONX3248G035 (320×480 portrait, ST7796) ────────────────────
 // =============================================================================
+
+// Read first touch point from CST826. Returns false if no touch or I2C error.
+// Assumes rotation=0: x 0..319 left→right, y 0..479 top→bottom.
+// If screen appears rotated 180°, change setRotation(0) to setRotation(2)
+// and negate: x = 319 - x; y = 479 - y;
+bool readTouch(int16_t &x, int16_t &y) {
+  Wire.beginTransmission(TOUCH_ADDR);
+  Wire.write(0x00);
+  if (Wire.endTransmission(false) != 0) return false;
+  Wire.requestFrom((uint8_t)TOUCH_ADDR, (uint8_t)6);
+  if (Wire.available() < 6) return false;
+  uint8_t buf[6];
+  for (int i = 0; i < 6; i++) buf[i] = Wire.read();
+  if ((buf[1] & 0x0F) == 0) return false;
+  x = ((buf[2] & 0x0F) << 8) | buf[3];
+  y = ((buf[4] & 0x0F) << 8) | buf[5];
+  return true;
+}
+
+// Shared brand header bar — drawn at top of every screen
+void drawHeader(const char* title) {
+  tft.fillRect(0, 0, SCREEN_WIDTH, 44, COL_ACCENT);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(0xFFFF, COL_ACCENT);
+  tft.setTextSize(3);
+  tft.drawString(title, SCREEN_WIDTH / 2, 22);
+}
 
 void displayMessage(const char* line1,
                     const char* line2 = "",
                     const char* line3 = "") {
   tft.fillScreen(COL_BG);
+  drawHeader("DigiSlip");
   tft.setTextDatum(MC_DATUM);
 
   tft.setTextColor(COL_ACCENT, COL_BG);
   tft.setTextSize(3);
-  tft.drawString(line1, SCREEN_WIDTH / 2, 110);
+  tft.drawString(line1, SCREEN_WIDTH / 2, 195);
 
   if (strlen(line2) > 0) {
     tft.setTextColor(COL_FG, COL_BG);
     tft.setTextSize(2);
-    tft.drawString(line2, SCREEN_WIDTH / 2, 170);
+    tft.drawString(line2, SCREEN_WIDTH / 2, 255);
   }
 
   if (strlen(line3) > 0) {
-    tft.setTextColor(COL_FG, COL_BG);
+    tft.setTextColor(COL_MUTED, COL_BG);
     tft.setTextSize(2);
-    tft.drawString(line3, SCREEN_WIDTH / 2, 215);
+    tft.drawString(line3, SCREEN_WIDTH / 2, 295);
   }
 }
 
@@ -336,72 +379,100 @@ void displayIdle() {
   if (millis() - lastIdleRefresh < 5000) return;
   lastIdleRefresh = millis();
 
-  String timeStr = getTimeHHMM();
-  String wifiStr = (WiFi.status() == WL_CONNECTED) ? "WiFi: OK" : "WiFi: OFFLINE";
-  String txStr   = "TX #" + String(txCounter);
-  int    qDepth  = offlineQueueLen();
-  if (qDepth > 0) txStr += "   Q:" + String(qDepth);
-
   tft.fillScreen(COL_BG);
-  tft.setTextDatum(MC_DATUM);
+  drawHeader("DigiSlip");
 
-  // Large clock — 480×320 landscape, push it up a bit
+  // Large clock
+  tft.setTextDatum(MC_DATUM);
   tft.setTextColor(COL_ACCENT, COL_BG);
   tft.setTextSize(6);
-  tft.drawString(timeStr, SCREEN_WIDTH / 2, 95);
+  tft.drawString(getTimeHHMM(), SCREEN_WIDTH / 2, 135);
 
   // Divider
-  tft.drawFastHLine(20, 155, SCREEN_WIDTH - 40, COL_ACCENT);
+  tft.drawFastHLine(20, 172, SCREEN_WIDTH - 40, COL_FAINT);
 
-  // Status lines
-  tft.setTextColor(COL_FG, COL_BG);
+  // WiFi status chip
+  bool connected = (WiFi.status() == WL_CONNECTED);
+  tft.fillRoundRect(40, 188, 240, 40, 8, COL_CARD);
+  tft.setTextColor(connected ? COL_SUCCESS : COL_ERROR, COL_CARD);
   tft.setTextSize(2);
-  tft.drawString(wifiStr,              SCREEN_WIDTH / 2, 190);
-  tft.drawString(txStr,                SCREEN_WIDTH / 2, 225);
-  tft.drawString("Ready for next sale", SCREEN_WIDTH / 2, 265);
+  tft.drawString(connected ? "WiFi  Connected" : "WiFi  Offline",
+                 SCREEN_WIDTH / 2, 208);
 
-  // Board label bottom-right (handy during dev)
-  tft.setTextDatum(BR_DATUM);
+  // TX counter chip
+  String txStr = "TX  #" + String(txCounter);
+  int qDepth = offlineQueueLen();
+  if (qDepth > 0) txStr += "   Q:" + String(qDepth);
+  tft.fillRoundRect(40, 238, 240, 40, 8, COL_CARD);
+  tft.setTextColor(COL_FG, COL_CARD);
+  tft.setTextSize(2);
+  tft.drawString(txStr, SCREEN_WIDTH / 2, 258);
+
+  // Ready label
+  tft.setTextColor(COL_MUTED, COL_BG);
+  tft.drawString("Ready for next sale", SCREEN_WIDTH / 2, 330);
+
+  // Device ID footer
+  tft.setTextDatum(BC_DATUM);
   tft.setTextSize(1);
-  tft.setTextColor(0x4208, COL_BG);  // dark grey
-  tft.drawString("ONX3248G035", SCREEN_WIDTH - 4, SCREEN_HEIGHT - 4);
+  tft.setTextColor(COL_FAINT, COL_BG);
+  tft.drawString(TILL_ID, SCREEN_WIDTH / 2, SCREEN_HEIGHT - 6);
   tft.setTextDatum(MC_DATUM);
 }
 
 void drawQR(const char* text) {
+  tft.fillScreen(COL_BG);
+  drawHeader("DigiSlip");
+
   QRCode qrcode;
   uint8_t qrcodeData[qrcode_getBufferSize(5)];
   qrcode_initText(&qrcode, qrcodeData, 5, 0, text);
 
-  int size    = qrcode.size;
-  int scale   = 7;  // 480px wide — scale 7 gives ~287px QR, easily scannable
-  int offsetX = (SCREEN_WIDTH  - size * scale) / 2;
-  int offsetY = (SCREEN_HEIGHT - size * scale) / 2 - 15;
+  int size = qrcode.size;   // 37 modules for version 5
+  int scale = 7;
+  int qrPx  = size * scale;  // 259px
+  int pad   = 8;
+  int cardX = (SCREEN_WIDTH - qrPx) / 2 - pad;
+  int cardY = 50;
+  int cardW = qrPx + pad * 2;
+  int cardH = qrPx + pad * 2;
 
-  tft.fillScreen(COL_FG);  // white background for QR
+  // White card (scanners need high contrast — don't use warm beige here)
+  tft.fillRoundRect(cardX, cardY, cardW, cardH, 6, COL_CARD);
 
+  int ox = cardX + pad;
+  int oy = cardY + pad;
   for (int y = 0; y < size; y++) {
     for (int x = 0; x < size; x++) {
-      uint16_t colour = qrcode_getModule(&qrcode, x, y) ? COL_BG : COL_FG;
-      tft.fillRect(offsetX + x * scale,
-                   offsetY + y * scale,
-                   scale, scale, colour);
+      uint16_t col = qrcode_getModule(&qrcode, x, y) ? COL_FG : COL_CARD;
+      tft.fillRect(ox + x * scale, oy + y * scale, scale, scale, col);
     }
   }
 
+  // Subtitle
   tft.setTextDatum(MC_DATUM);
-  tft.setTextColor(COL_BG, COL_FG);
+  tft.setTextColor(COL_MUTED, COL_BG);
   tft.setTextSize(2);
-  tft.drawString("Scan or Tap to claim", SCREEN_WIDTH / 2, SCREEN_HEIGHT - 16);
-}
+  tft.drawString("Scan or tap to claim", SCREEN_WIDTH / 2, cardY + cardH + 16);
 
-void drawClaimCountdown() {
-  unsigned long elapsed = millis() - claimWindowStart;
-  if (elapsed >= CLAIM_TIMEOUT_MS) return;
+  // Print button (filled green)
+  tft.fillRoundRect(BTN_PRINT_X, BTN_PRINT_Y, BTN_PRINT_W, BTN_PRINT_H, 10, COL_SUCCESS);
+  tft.setTextColor(COL_ON_GREEN, COL_SUCCESS);
+  tft.setTextSize(2);
+  tft.drawString("Print Slip", SCREEN_WIDTH / 2, BTN_PRINT_Y + BTN_PRINT_H / 2);
 
-  int barWidth = map(elapsed, 0, CLAIM_TIMEOUT_MS, SCREEN_WIDTH, 0);
-  tft.fillRect(0, SCREEN_HEIGHT - 8, SCREEN_WIDTH, 8, COL_BG);
-  tft.fillRect(0, SCREEN_HEIGHT - 8, barWidth,     8, COL_BAR);
+  // Cancel button (outlined)
+  tft.fillRoundRect(BTN_CANCEL_X, BTN_CANCEL_Y, BTN_CANCEL_W, BTN_CANCEL_H, 8, COL_BG);
+  tft.drawRoundRect(BTN_CANCEL_X, BTN_CANCEL_Y, BTN_CANCEL_W, BTN_CANCEL_H, 8, COL_MUTED);
+  tft.setTextColor(COL_MUTED, COL_BG);
+  tft.setTextSize(2);
+  tft.drawString("Cancel", SCREEN_WIDTH / 2, BTN_CANCEL_Y + BTN_CANCEL_H / 2);
+
+  // NFC hint
+  tft.setTextSize(1);
+  tft.setTextColor(COL_FAINT, COL_BG);
+  tft.drawString("or tap NFC card", SCREEN_WIDTH / 2,
+                 BTN_CANCEL_Y + BTN_CANCEL_H + 14);
 }
 
 // =============================================================================
@@ -523,11 +594,11 @@ String supabasePost(const String& json) {
   String newSlipId = "";
   if (code >= 200 && code < 300) {
     String body = https.getString();
-    Serial.println("[Supabase] POST OK → " + body);
     DynamicJsonDocument doc(1024);
     if (deserializeJson(doc, body) == DeserializationError::Ok) {
       newSlipId = doc[0]["id"].as<String>();
     }
+    Serial.println("[Supabase] POST OK → " + body);
   } else {
     Serial.println("[Supabase] POST failed: " + String(code) + " " + https.getString());
   }
@@ -613,14 +684,14 @@ void flushOfflineQueue() {
   int depth = offlineQueueLen();
   if (depth == 0) return;
 
-  Serial.println("[Queue] WiFi restored — flushing " + String(depth) + " queued slips");
+  Serial.println("[Queue] Flushing " + String(depth) + " queued slips");
 
   while (offlineQueueLen() > 0) {
     String json = offlineQueuePop();
     if (json.length() == 0) break;
     String id = supabasePost(json);
     if (id.length() > 0) {
-      Serial.println("[Queue] Flushed slip → id: " + id);
+      Serial.println("[Queue] Flushed → " + id);
     } else {
       Serial.println("[Queue] Flush failed — re-queuing");
       offlineQueuePush(json);
@@ -640,7 +711,7 @@ void setup() {
 
   // ── Persistent storage ──────────────────────────────────────────────────────
   txCounter = loadTxCounter();
-  Serial.println("[NVS] Transaction counter: " + String(txCounter));
+  Serial.println("[NVS] TX counter: " + String(txCounter));
 
   // ── Backlight ───────────────────────────────────────────────────────────────
   pinMode(TFT_BL_PIN, OUTPUT);
@@ -648,10 +719,17 @@ void setup() {
 
   // ── TFT display ─────────────────────────────────────────────────────────────
   tft.init();
-  tft.setRotation(1);  // landscape — 480 wide, 320 tall
-  tft.fillScreen(COL_BG);
-  displayMessage("DigiSlip", "Booting...", "v2.1 S3");
-  Serial.println("[TFT] OK — ST7796 480x320");
+  tft.setRotation(0);  // portrait — 320 wide, 480 tall
+  tft.fillScreen(COL_ACCENT);
+  // Splash on brand-blue background
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(0xFFFF, COL_ACCENT);
+  tft.setTextSize(4);
+  tft.drawString("DigiSlip", SCREEN_WIDTH / 2, 200);
+  tft.setTextSize(2);
+  tft.setTextColor(0xC618, COL_ACCENT);  // dimmed white
+  tft.drawString("v2.1", SCREEN_WIDTH / 2, 255);
+  Serial.println("[TFT] OK — ST7796 320x480 portrait");
 
   // ── I2C — Grove I2C connector ───────────────────────────────────────────────
   Wire.begin(I2C_SDA, I2C_SCL);
@@ -662,34 +740,30 @@ void setup() {
   uint32_t nfcVer = nfc.getFirmwareVersion();
   if (!nfcVer) {
     Serial.println("[NFC] PN532 not found — check Grove I2C wiring");
-    displayMessage("NFC FAIL", "Check Grove I2C", "SDA=IO8 SCL=IO7");
+    displayMessage("NFC Error", "Check Grove I2C", "SDA=IO8 SCL=IO7");
     while (true) delay(100);
   }
-  Serial.printf("[NFC] PN532 firmware v%d.%d\n",
+  Serial.printf("[NFC] PN532 v%d.%d\n",
                 (nfcVer >> 16) & 0xFF, (nfcVer >> 8) & 0xFF);
   nfc.SAMConfig();
-  Serial.println("[NFC] OK");
 
   // ── UART1 — Grove UART connector (POS RX + Printer TX) ──────────────────────
   // Both directions on the same UART — IO12=RX from POS, IO13=TX to Printer
   posSerial.begin(9600, SERIAL_8N1, UART1_RX, UART1_TX);
-  posSerial.setRxBufferSize(4096);  // S3 PSRAM available — use it
-  Serial.println("[UART1] POS RX=IO12 @ 9600, Printer TX=IO13 @ 9600");
-  // NOTE: printer baud must match POS baud on shared UART.
-  // If your printer needs 19200, change both POS and printer to 19200.
+  posSerial.setRxBufferSize(4096);
+  Serial.println("[UART1] RX=IO12 TX=IO13 @ 9600");
 
   // ── Button — 24-pin header IO38 ─────────────────────────────────────────────
   pinMode(BUTTON_PIN, INPUT_PULLUP);
-  Serial.println("[BTN] Button on IO38");
 
   // ── WiFi ────────────────────────────────────────────────────────────────────
   displayMessage("Connecting", "to WiFi...");
   wifiConnect();
 
   if (WiFi.status() == WL_CONNECTED) {
-    displayMessage("WiFi OK", WiFi.localIP().toString().c_str(), "NTP synced");
+    displayMessage("WiFi OK", WiFi.localIP().toString().c_str(), "Time synced");
   } else {
-    displayMessage("WiFi FAILED", "Offline mode", "Queue active");
+    displayMessage("WiFi Failed", "Offline mode", "Queue active");
   }
   delay(1500);
 
@@ -733,7 +807,7 @@ void loop() {
         slipId           = "";
         nfcUID           = "";
         currentState     = STATE_BUFFERING;
-        displayMessage("Receiving", "POS data...");
+        displayMessage("Receiving...");
         Serial.println("[UART] Data incoming — buffering");
       }
       break;
@@ -764,7 +838,7 @@ void loop() {
         saveTxCounter(txCounter);
 
         currentState = STATE_UPLOADING;
-        displayMessage("Uploading...", ("TX #" + String(txCounter)).c_str());
+        displayMessage("Loading...", ("TX #" + String(txCounter)).c_str());
       }
       break;
     }
@@ -780,7 +854,6 @@ void loop() {
         slipId = supabasePost(json);
 
         if (slipId.length() > 0) {
-          Serial.println("[Supabase] Slip ID: " + slipId);
           currentState     = STATE_WAITING_CLAIM;
           claimWindowStart = millis();
           lastPollTime     = 0;
@@ -794,14 +867,14 @@ void loop() {
           offlineQueuePush(json);
           currentState     = STATE_WAITING_CLAIM;
           claimWindowStart = millis();
-          displayMessage("Cloud failed", "Press button", "for paper slip");
+          displayMessage("Upload failed", "Tap Print for paper");
         }
       } else {
         offlineQueuePush(json);
         Serial.println("[Offline] Queued TX#" + String(txCounter));
         currentState     = STATE_WAITING_CLAIM;
         claimWindowStart = millis();
-        displayMessage("No WiFi", "Press button", "for paper slip");
+        displayMessage("No WiFi", "Tap Print for paper");
       }
       break;
     }
@@ -822,17 +895,43 @@ void loop() {
         }
       }
 
-      // 2. Button check before NFC (NFC blocks ~50ms per pass)
+      // 2. Touch buttons (debounced 300ms)
+      static unsigned long lastTouchTime = 0;
+      if (millis() - lastTouchTime > 300) {
+        int16_t tx, ty;
+        if (readTouch(tx, ty)) {
+          lastTouchTime = millis();
+          if (tx >= BTN_PRINT_X && tx < BTN_PRINT_X + BTN_PRINT_W &&
+              ty >= BTN_PRINT_Y && ty < BTN_PRINT_Y + BTN_PRINT_H) {
+            Serial.println("[BTN] Print tapped");
+            currentState = STATE_PRINTING;
+            break;
+          }
+          if (tx >= BTN_CANCEL_X && tx < BTN_CANCEL_X + BTN_CANCEL_W &&
+              ty >= BTN_CANCEL_Y && ty < BTN_CANCEL_Y + BTN_CANCEL_H) {
+            Serial.println("[BTN] Cancel tapped");
+            printBufferLen   = 0;
+            receiptLineCount = 0;
+            slipId           = "";
+            nfcUID           = "";
+            currentState     = STATE_IDLE;
+            lastIdleRefresh  = 0;
+            break;
+          }
+        }
+      }
+
+      // 3. Physical button IO38 — Print fallback
       if (digitalRead(BUTTON_PIN) == LOW) {
         delay(50);
         if (digitalRead(BUTTON_PIN) == LOW) {
-          Serial.println("[BTN] Button pressed — printing");
+          Serial.println("[BTN] Physical button — printing");
           currentState = STATE_PRINTING;
           break;
         }
       }
 
-      // 3. NFC tap
+      // 4. NFC tap
       uint8_t uid[7];
       uint8_t uidLen = 0;
       if (nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLen, 50)) {
@@ -845,8 +944,7 @@ void loop() {
         nfcUID.toUpperCase();
         Serial.println("[NFC] UID: " + nfcUID);
 
-        displayMessage("Card detected!", nfcUID.substring(0, 17).c_str(),
-                       "Linking slip...");
+        displayMessage("Linking...", nfcUID.substring(0, 17).c_str());
 
         if (slipId.length() > 0) {
           bool ok = supabaseNfcClaim(slipId, nfcUID);
@@ -858,12 +956,7 @@ void loop() {
         break;
       }
 
-      // 4. Countdown bar
-      if (slipId.length() > 0) {
-        drawClaimCountdown();
-      }
-
-      // 5. Timeout
+      // 5. Timeout — silent return to IDLE (digital slip unaffected, 24h expiry applies)
       if (elapsed >= CLAIM_TIMEOUT_MS) {
         Serial.println("[Timeout] No claim — returning to IDLE");
         Serial.println("[Timeout] Slip " + slipId + " remains unclaimed");
@@ -873,8 +966,6 @@ void loop() {
         nfcUID           = "";
         currentState     = STATE_IDLE;
         lastIdleRefresh  = 0;
-        displayMessage("Timeout", "Slip saved", "No print");
-        delay(1500);
       }
 
       break;
@@ -882,7 +973,7 @@ void loop() {
 
     // ──────────────────────────────────────────────────────────────────────────
     case STATE_CLAIMED: {
-      displayMessage("Slip claimed!", "Sent to app :)", "No paper needed");
+      displayMessage("Claimed!", "Saved to your app");
       Serial.println("[SYS] Digital claim complete. Print blocked.");
       delay(2500);
 
@@ -901,12 +992,11 @@ void loop() {
       Serial.println("[PRINT] Forwarding " +
                      String(printBufferLen) + " bytes to printer");
 
-      // TX on same UART1 — IO13 to printer via MAX3232
       posSerial.write(printBuffer, printBufferLen);
       posSerial.flush();
 
       Serial.println("[PRINT] Done");
-      displayMessage("Printed!", "Have a great day");
+      displayMessage("Printed", "Have a great day");
       delay(2000);
 
       printBufferLen   = 0;
