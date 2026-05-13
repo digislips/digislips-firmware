@@ -516,57 +516,56 @@ void displayIdle() {
 
 void drawQR(const char* text) {
   tft.fillScreen(COL_BG);
-  drawHeader(nullptr, 0, 0, 0, false);
+  drawHeader("Awaiting claim", COL_GREEN_LT, COL_GREEN_BD, COL_GREEN_DK, true);
 
+  // Receipt card
+  int cardX = 22;
+  int cardY = 58;
+  int cardW = SCREEN_WIDTH - 44;   // 276px
+  int cardH = 256;
+  tft.fillRoundRect(cardX, cardY, cardW, cardH, 8, COL_CARD);
+  tft.drawRoundRect(cardX, cardY, cardW, cardH, 8, COL_FAINT);
+
+  // QR code — version 5, scale 5 → 185×185px, centred in card
   QRCode qrcode;
   uint8_t qrcodeData[qrcode_getBufferSize(5)];
   qrcode_initText(&qrcode, qrcodeData, 5, 0, text);
-
-  int size = qrcode.size;   // 37 modules for version 5
-  int scale = 7;
-  int qrPx  = size * scale;  // 259px
-  int pad   = 8;
-  int cardX = (SCREEN_WIDTH - qrPx) / 2 - pad;
-  int cardY = 50;
-  int cardW = qrPx + pad * 2;
-  int cardH = qrPx + pad * 2;
-
-  // White card (scanners need high contrast — don't use warm beige here)
-  tft.fillRoundRect(cardX, cardY, cardW, cardH, 6, COL_CARD);
-
-  int ox = cardX + pad;
-  int oy = cardY + pad;
-  for (int y = 0; y < size; y++) {
-    for (int x = 0; x < size; x++) {
-      uint16_t col = qrcode_getModule(&qrcode, x, y) ? COL_FG : COL_CARD;
+  int scale = 5;
+  int qrPx  = qrcode.size * scale;
+  int ox    = cardX + (cardW - qrPx) / 2;
+  int oy    = cardY + 10;
+  for (int y = 0; y < qrcode.size; y++) {
+    for (int x = 0; x < qrcode.size; x++) {
+      uint16_t col = qrcode_getModule(&qrcode, x, y) ? TFT_BLACK : COL_CARD;
       tft.fillRect(ox + x * scale, oy + y * scale, scale, scale, col);
     }
   }
 
-  // Subtitle
+  // Slip label
+  tft.setFreeFont(&FreeMono9pt7b);
   tft.setTextDatum(MC_DATUM);
-  tft.setTextColor(COL_MUTED, COL_BG);
-  tft.setTextSize(2);
-  tft.drawString("Scan or tap to claim", SCREEN_WIDTH / 2, cardY + cardH + 16);
+  tft.setTextColor(COL_FG, COL_CARD);
+  tft.drawString(("Slip #" + String(txCounter)).c_str(),
+                 cardX + cardW / 2, oy + qrPx + 16);
 
-  // Print button (filled green)
+  // Caption below card
+  tft.setTextColor(COL_MUTED, COL_BG);
+  tft.drawString("SCAN QR OR TAP NFC", SCREEN_WIDTH / 2, cardY + cardH + 18);
+
+  // Print button
   tft.fillRoundRect(BTN_PRINT_X, BTN_PRINT_Y, BTN_PRINT_W, BTN_PRINT_H, 10, COL_GREEN);
+  tft.setFreeFont(nullptr);
+  tft.setTextSize(2);
   tft.setTextColor(0xFFFF, COL_GREEN);
-  tft.setTextSize(2);
-  tft.drawString("Print Slip", SCREEN_WIDTH / 2, BTN_PRINT_Y + BTN_PRINT_H / 2);
+  tft.setTextDatum(MC_DATUM);
+  tft.drawString("Print slip", SCREEN_WIDTH / 2, BTN_PRINT_Y + BTN_PRINT_H / 2);
 
-  // Cancel button (outlined)
+  // Cancel button
   tft.fillRoundRect(BTN_CANCEL_X, BTN_CANCEL_Y, BTN_CANCEL_W, BTN_CANCEL_H, 8, COL_BG);
-  tft.drawRoundRect(BTN_CANCEL_X, BTN_CANCEL_Y, BTN_CANCEL_W, BTN_CANCEL_H, 8, COL_MUTED);
+  tft.drawRoundRect(BTN_CANCEL_X, BTN_CANCEL_Y, BTN_CANCEL_W, BTN_CANCEL_H, 8, COL_FAINT);
   tft.setTextColor(COL_MUTED, COL_BG);
-  tft.setTextSize(2);
   tft.drawString("Cancel", SCREEN_WIDTH / 2, BTN_CANCEL_Y + BTN_CANCEL_H / 2);
-
-  // NFC hint
   tft.setTextSize(1);
-  tft.setTextColor(COL_FAINT, COL_BG);
-  tft.drawString("or tap NFC card", SCREEN_WIDTH / 2,
-                 BTN_CANCEL_Y + BTN_CANCEL_H + 14);
 }
 
 // =============================================================================
@@ -1068,6 +1067,16 @@ void loop() {
         nfcUID           = "";
         currentState     = STATE_IDLE;
         lastIdleRefresh  = 0;
+      }
+
+      // 6. Countdown footer — update once per second
+      static unsigned long lastFooterUpdate = 0;
+      if (millis() - lastFooterUpdate >= 1000) {
+        lastFooterUpdate = millis();
+        int remaining = max(0L, (long)(CLAIM_TIMEOUT_MS - elapsed)) / 1000;
+        char countdown[32];
+        sprintf(countdown, "TILL-01  waiting  %d:%02d", remaining / 60, remaining % 60);
+        drawFooter(countdown);
       }
 
       break;
