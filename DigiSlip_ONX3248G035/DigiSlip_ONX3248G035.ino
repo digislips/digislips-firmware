@@ -192,6 +192,10 @@ unsigned long lastPollTime     = 0;
 unsigned long lastWifiCheck    = 0;
 unsigned long lastIdleRefresh  = 0;
 
+// Offline watchdog
+unsigned long wifiLostTime    = 0;
+SystemState   preOfflineState = STATE_IDLE;
+
 // NVS-backed transaction counter (survives reboots)
 uint32_t txCounter = 0;
 
@@ -330,10 +334,23 @@ void wifiConnect() {
 void wifiWatchdog() {
   if (millis() - lastWifiCheck < WIFI_WATCHDOG_MS) return;
   lastWifiCheck = millis();
+
   if (WiFi.status() != WL_CONNECTED) {
+    if (wifiLostTime == 0) wifiLostTime = millis();
     Serial.println("[WiFi] Lost — reconnecting");
     WiFi.disconnect();
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    if (millis() - wifiLostTime > 30000 && currentState != STATE_OFFLINE) {
+      preOfflineState = currentState;
+      currentState    = STATE_OFFLINE;
+    }
+  } else {
+    if (currentState == STATE_OFFLINE) {
+      Serial.println("[WiFi] Reconnected — restoring state");
+      currentState    = preOfflineState;
+      lastIdleRefresh = 0;
+    }
+    wifiLostTime = 0;
   }
 }
 
@@ -631,6 +648,39 @@ void drawCancelled() {
   tft.drawString("Digital slip claimable 24h.", SCREEN_WIDTH / 2, 272);
 
   drawFooter("Returning to idle...");
+}
+
+// =============================================================================
+//  ── OFFLINE SCREEN ───────────────────────────────────────────────────────────
+// =============================================================================
+
+void drawOffline() {
+  tft.fillScreen(COL_BG);
+  drawHeader("Offline", COL_RED_LT, 0xFE65, COL_RED, true);
+
+  // Red disc
+  int cx = SCREEN_WIDTH / 2;
+  tft.fillCircle(cx, 130, 36, COL_RED_LT);
+  tft.drawCircle(cx, 130, 36, 0xFE65);
+  tft.drawCircle(cx, 130, 35, 0xFE65);
+  // WiFi-off icon: two arcs + diagonal strike (approx with lines)
+  tft.drawLine(cx - 18, cx - 50, cx + 18, cx - 6, COL_RED);  // diagonal slash
+  tft.drawLine(cx - 19, cx - 50, cx + 19, cx - 6, COL_RED);
+
+  // Headline
+  tft.setFreeFont(&FreeSansBold9pt7b);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(COL_FG, COL_BG);
+  tft.drawString("Lost connection", SCREEN_WIDTH / 2, 196);
+
+  // Body
+  tft.setFreeFont(&FreeMono9pt7b);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(COL_MUTED, COL_BG);
+  tft.drawString("Slips will queue locally and", SCREEN_WIDTH / 2, 226);
+  tft.drawString("upload when WiFi returns.", SCREEN_WIDTH / 2, 246);
+
+  drawFooter(TILL_ID "  check router");
 }
 
 // =============================================================================
@@ -1209,6 +1259,36 @@ void loop() {
         tft.drawArc(cx, cy, 36, 30, (spinAngle + 90) % 360, (spinAngle + 180) % 360, COL_FAINT, COL_BG);
         spinAngle = (spinAngle + 10) % 360;
       }
+      break;
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    case STATE_OFFLINE: {
+      static bool offlineDrawn = false;
+      static unsigned long lastOfflineUpdate = 0;
+      if (!offlineDrawn) {
+        drawOffline();
+        offlineDrawn = true;
+      }
+      // Update info cards every second
+      if (millis() - lastOfflineUpdate >= 1000) {
+        lastOfflineUpdate = millis();
+        int depth = offlineQueueLen();
+        char queuedStr[8];
+        sprintf(queuedStr, "%d", depth);
+        // Info card: queued slips
+        tft.setFreeFont(&FreeMono9pt7b);
+        tft.setTextDatum(ML_DATUM);
+        tft.setTextColor(COL_FG, COL_CARD);
+        tft.fillRoundRect(22, 278, SCREEN_WIDTH - 44, 36, 6, COL_CARD);
+        tft.drawRoundRect(22, 278, SCREEN_WIDTH - 44, 36, 6, COL_FAINT);
+        tft.drawString("Queued slips", 34, 296);
+        tft.setTextDatum(MR_DATUM);
+        tft.drawString(queuedStr, SCREEN_WIDTH - 34, 296);
+        tft.setTextDatum(MC_DATUM);
+      }
+      // wifiWatchdog handles reconnect and state restore
+      if (WiFi.status() == WL_CONNECTED) offlineDrawn = false;
       break;
     }
 
