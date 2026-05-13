@@ -13,22 +13,28 @@ Requirements: pip install Pillow requests
 
 import argparse
 import math
+import re
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
 
-FONT_URL = (
-    "https://fonts.gstatic.com/s/syne/v22/"
-    "8vIS7w4qzmVxsWxjBZRjr0FKM_SKmlI.ttf"
+import re
+
+# Syne variable font from the google/fonts GitHub repo — reliable direct TTF.
+# The file contains all weights (400–800); we activate ExtraBold via a
+# variation axis after loading.
+_FONT_URL = (
+    "https://raw.githubusercontent.com/google/fonts/main/ofl/syne/"
+    "Syne%5Bwght%5D.ttf"
 )
 
-SIZES = [38, 22]
+SIZES  = [38, 22]
 HALVES = ["digi", "Slips"]
 
 
 def fetch_font(local_path: str | None = None) -> Path:
-    """Return a Path to Syne-ExtraBold.ttf, downloading if necessary."""
+    """Return a Path to the Syne variable TTF, downloading if necessary."""
     if local_path:
         p = Path(local_path)
         if not p.exists():
@@ -39,12 +45,12 @@ def fetch_font(local_path: str | None = None) -> Path:
     if dest.exists():
         return dest
 
-    import requests
-    print("Downloading Syne-ExtraBold.ttf from Google Fonts...")
-    r = requests.get(FONT_URL, timeout=15)
+    import requests  # lazy import — not needed when --font is supplied
+    print("Downloading Syne variable font from github.com/google/fonts...")
+    r = requests.get(_FONT_URL, timeout=15)
     r.raise_for_status()
     dest.write_bytes(r.content)
-    print(f"  → saved to {dest}")
+    print(f"  -> saved to {dest}")
     return dest
 
 
@@ -109,6 +115,10 @@ def write_headers(font_path: Path, output_dir: Path) -> None:
     """Generate wordmark_38.h and wordmark_22.h in output_dir."""
     for size in SIZES:
         font = ImageFont.truetype(str(font_path), size)
+        try:
+            font.set_variation_by_name("ExtraBold")  # weight 800 from variable font
+        except (OSError, AttributeError):
+            pass  # static font supplied via --font; use as-is
         blocks = []
         for half in HALVES:
             prefix = half.upper()
