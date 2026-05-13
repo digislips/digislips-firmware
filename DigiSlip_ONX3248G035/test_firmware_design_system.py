@@ -45,10 +45,8 @@ REQUIRED_PALETTE = {
 REMOVED_CONSTANTS = ["COL_ACCENT", "COL_SUCCESS", "COL_ERROR", "COL_ON_GREEN"]
 
 REQUIRED_FREEFONTS = [
-    "GFXFF/FreeSansBold18pt7b.h",
-    "GFXFF/FreeSansBold24pt7b.h",
-    "GFXFF/FreeMono9pt7b.h",
-    "GFXFF/FreeMono12pt7b.h",
+    "FreeMono9pt7b",   # used in drawPill / drawHeader / drawFooter / displayBoot
+    # FreeSansBold and FreeMono12pt are tested in the screen-function issues (#3-#8)
 ]
 
 REQUIRED_HELPERS = [
@@ -90,11 +88,11 @@ def test_color_constants_have_correct_rgb565_values():
         )
 
 
-# ── Behavior 4: FreeFonts includes ───────────────────────────────────────────
+# ── Behavior 4: FreeFonts symbols used ───────────────────────────────────────
 
-def test_freefonts_included():
+def test_freefonts_used():
     for fname in REQUIRED_FREEFONTS:
-        assert fname in SOURCE, f"Missing FreeFonts include: {fname}"
+        assert fname in SOURCE, f"FreeFonts symbol not referenced: {fname}"
 
 
 # ── Behavior 5: helper functions defined ─────────────────────────────────────

@@ -43,11 +43,7 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
-#include <TFT_eSPI.h>
-#include <Fonts/GFXFF/FreeSansBold18pt7b.h>
-#include <Fonts/GFXFF/FreeSansBold24pt7b.h>
-#include <Fonts/GFXFF/FreeMono9pt7b.h>
-#include <Fonts/GFXFF/FreeMono12pt7b.h>
+#include <TFT_eSPI.h>  // gfxfont.h (pulled in by TFT_eSPI) already includes all FreeFonts
 #include <Adafruit_PN532.h>
 #include <QRCodeGenerator.h>
 #include <ArduinoJson.h>
