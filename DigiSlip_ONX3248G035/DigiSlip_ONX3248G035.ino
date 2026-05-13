@@ -373,7 +373,7 @@ void drawWordmark(int cx, int y, int size) {
 void drawPill(int cx, int cy, const char* text,
               uint16_t bg, uint16_t bd, uint16_t tx,
               bool dot, uint16_t dotc) {
-  tft.setFreeFont(&FreeMono9pt7b);
+  tft.setFreeFont(&FreeSans9pt7b);
   int tw  = tft.textWidth(text);
   int pw  = tw + 24 + (dot ? 18 : 0);
   int ph  = 26;
@@ -391,6 +391,7 @@ void drawPill(int cx, int cy, const char* text,
     tft.setTextColor(tx, bg);
     tft.drawString(text, cx, cy);
   }
+  tft.setTextDatum(MC_DATUM);  // always restore
 }
 
 void drawHeader(const char* pillText,
@@ -402,7 +403,7 @@ void drawHeader(const char* pillText,
   tft.drawBitmap(18 + DIGI_22_W,  y, SLIPS_22_BITMAP, SLIPS_22_W, SLIPS_22_H, COL_GREEN, COL_BG);
   tft.drawFastHLine(0, 44, SCREEN_WIDTH, COL_FAINT);
   if (pillText) {
-    tft.setFreeFont(&FreeMono9pt7b);
+    tft.setFreeFont(&FreeSans9pt7b);
     int tw = tft.textWidth(pillText);
     int pw = tw + 24 + (dot ? 18 : 0);
     int ph = 24;
@@ -421,6 +422,7 @@ void drawHeader(const char* pillText,
       tft.drawString(pillText, x0 + pw / 2, 22);
     }
   }
+  tft.setTextDatum(MC_DATUM);  // always restore
 }
 
 void drawFooter(const char* text) {
@@ -486,20 +488,23 @@ void displayIdle() {
   tft.drawString("PAPERLESS TILL SLIPS", SCREEN_WIDTH / 2, 148);
 
   // Headline
-  tft.setFreeFont(&FreeSansBold12pt7b);
+  tft.setFreeFont(&FreeSansBold9pt7b);
+  tft.setTextDatum(MC_DATUM);
   tft.setTextColor(COL_FG, COL_BG);
   tft.drawString("Ready for next sale", SCREEN_WIDTH / 2, 220);
 
   // READY pill
   drawPill(SCREEN_WIDTH / 2, 258, "READY", COL_GREEN_LT, COL_GREEN_BD, COL_GREEN_DK, true, COL_GREEN);
 
-  // Body copy
+  // Body copy — reset datum after pill (pill may leave ML_DATUM)
   tft.setFreeFont(&FreeMono9pt7b);
+  tft.setTextDatum(MC_DATUM);
   tft.setTextColor(COL_MUTED, COL_BG);
-  tft.drawString("Your slip will appear here \x97", SCREEN_WIDTH / 2, 306);
+  tft.drawString("Your slip appears here", SCREEN_WIDTH / 2, 306);
   tft.drawString("scan or tap to save it.", SCREEN_WIDTH / 2, 326);
 
   // Date / time line
+  tft.setTextDatum(MC_DATUM);
   tft.drawString(getDateLine(), SCREEN_WIDTH / 2, 446);
 
   drawFooter("TILL-01  v2.2");
