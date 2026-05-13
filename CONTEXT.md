@@ -4,9 +4,11 @@
 
 Arduino/ESP32 firmware for the DigiSlip hardware device. The device sits inline between a POS machine and a thermal printer on RS232. It intercepts the raw ESC/POS byte stream, strips control codes to extract readable receipt text, uploads to the Supabase backend, and shows a QR code so the customer can claim their receipt digitally instead of printing.
 
-**Board:** Nextion ONX3248G035 (ESP32-S3R8, 3.5" IPS ST7796 display 320×480 portrait, CST826 capacitive touch, PN532 NFC reader via Grove I2C)
+**Board:** Nextion ONX3248G035 (ESP32-S3R8, 3.5" IPS ST7796 display 320×480 portrait, ~165 DPI, CST826 capacitive touch, PN532 NFC reader via Grove I2C)
 
 **One firmware file:** `DigiSlip_ONX3248G035/DigiSlip_ONX3248G035.ino`
+
+**Firmware version:** v2.2 (design system complete — all 9 screens implemented, May 2026)
 
 ---
 
@@ -21,10 +23,11 @@ Arduino/ESP32 firmware for the DigiSlip hardware device. The device sits inline 
 | **print** | Forwarding the buffered raw ESC/POS bytes to the thermal printer via UART1 |
 | **TILL-ID** | Per-device identifier hardcoded in firmware (e.g. `TILL-01`); corresponds to a device record in Supabase |
 | **device token** | 64-char hex secret hardcoded per device; validates device identity in Supabase edge functions |
-| **NFC claim** | CST826 path: PN532 reads the card UID → firmware calls `nfc-claim` edge function → resolves UID to user account |
+| **NFC claim** | PN532 reads card UID → firmware calls `nfc-claim` edge function → resolves UID to user account → `STATE_CLAIMED` |
 | **ESC/POS** | Epson receipt printer command language. The raw byte stream from the POS. The firmware strips control sequences, preserves printable ASCII and line breaks |
 | **offline queue** | NVS-backed FIFO (up to 5 transactions) used when WiFi is down. Flushed to Supabase when reconnected |
 | **STATE_WAITING_CLAIM** | The primary interactive state: QR displayed, polling Supabase, listening for touch/NFC/button |
+| **ClaimMethod** | Enum (`CLAIM_NONE`, `CLAIM_NFC`, `CLAIM_QR`) set before transitioning to `STATE_CLAIMED` — controls "via" text on the claimed screen |
 
 ---
 
@@ -33,26 +36,33 @@ Arduino/ESP32 firmware for the DigiSlip hardware device. The device sits inline 
 ```
 STATE_IDLE
   → (UART1 data arrives) → STATE_BUFFERING
-  
+
 STATE_BUFFERING
   → (500ms silence after last byte) → STATE_UPLOADING
 
 STATE_UPLOADING
   → (POST succeeds) → STATE_WAITING_CLAIM  [draws QR screen]
-  → (offline / POST failed) → STATE_WAITING_CLAIM  [shows "Tap Print for paper"]
+  → (offline / POST failed) → STATE_WAITING_CLAIM  [shows error message]
 
 STATE_WAITING_CLAIM
-  → (Supabase poll returns claimed=true) → STATE_CLAIMED
+  → (Supabase poll returns claimed=true) → STATE_CLAIMED  [claimMethod=CLAIM_QR]
   → (touch "Print Slip" or IO38 button) → STATE_PRINTING
-  → (touch "Cancel") → STATE_IDLE
-  → (NFC tap) → STATE_CLAIMED
-  → (60s timeout) → STATE_IDLE  [silent, no splash]
+  → (touch "Cancel") → STATE_CANCELLED
+  → (NFC tap) → STATE_CLAIMED  [claimMethod=CLAIM_NFC]
+  → (60s timeout) → STATE_IDLE  [silent]
 
 STATE_CLAIMED
-  → (2.5s display) → STATE_IDLE
+  → (9s display) → STATE_IDLE
+
+STATE_CANCELLED
+  → (3s display) → STATE_IDLE
 
 STATE_PRINTING
-  → (forward buffer to printer, 2s display) → STATE_IDLE
+  → (forward buffer + 3s spinner hold) → STATE_IDLE
+
+STATE_OFFLINE
+  → (WiFi reconnects) → preOfflineState  [restored automatically]
+  ← (any state, WiFi lost >30s) → STATE_OFFLINE
 ```
 
 ---
@@ -76,9 +86,81 @@ Print and Cancel only control the physical paper copy. The digital slip in Supab
 
 Verbose Serial output is intentional — the device is still in active development and the developer monitors serial during testing. Do not simplify or remove Serial.println calls.
 
-### On-Screen Messages
+### Display — Font and Rendering Rules (ONX3248G035, ~165 DPI)
 
-Keep on-screen status text brief and user-facing (e.g. "Loading...", "Linking...", "Claimed!"). The detailed diagnostic information lives in Serial, not on screen.
+FreeFonts render much larger than desktop pt sizes suggest at 165 DPI. Confirmed working sizes:
+
+| Role | Font | Safe length |
+|------|------|-------------|
+| Body / labels | `FreeMono9pt7b` | ~22 chars max centered |
+| Headlines | `FreeSansBold9pt7b` | ~19 chars max |
+| Pill labels | `setFreeFont(nullptr)` + `setTextSize(2)` | ~26 chars |
+| Wordmark | `drawWordmark()` bitmap | n/a |
+
+- `FreeSansBold12pt7b` or larger for strings >12 chars **overflows 320px** — do not use
+- `FreeSans9pt7b` for pill labels renders ~20px tall — too large for pill chrome; use bitmap `setTextSize(2)` instead
+- **Datum reset rule:** `drawPill(dot=true)` and `drawHeader(dot=true)` leave `ML_DATUM` set. Always call `tft.setTextDatum(MC_DATUM)` explicitly after these helpers
+
+### TFT_eSPI FreeFonts
+
+Do **not** add `#include <Fonts/GFXFF/FreeSansBold9pt7b.h>` (or any FreeFonts header) to the sketch. `TFT_eSPI.h` pulls in `gfxfont.h` unconditionally which includes every GFXFF font. Double-include causes "redefinition of const uint8_t …Bitmaps" compile errors.
+
+---
+
+## Design System v2.2
+
+### Colour Palette (RGB565)
+
+| Constant | Hex | RGB565 | Use |
+|----------|-----|--------|-----|
+| `COL_BG` | `#E8E4DA` | `0xEF3B` | Screen background |
+| `COL_CARD` | `#FEFDFB` | `0xFFFF` | Card surface (QR screen) |
+| `COL_FG` | `#1C1917` | `0x18C2` | Primary text |
+| `COL_MUTED` | `#78716C` | `0x7B8D` | Secondary text |
+| `COL_FAINT` | `#D6D3CD` | `0xD699` | Borders, dividers |
+| `COL_BLUE` | `#1558FF` | `0x12DF` | Brand blue, "digi" wordmark half |
+| `COL_GREEN` | `#00C96A` | `0x064D` | Brand green, "Slips" wordmark half |
+| `COL_GREEN_LT` | `#ECFDF5` | `0xEFFE` | Green badge / pill background |
+| `COL_GREEN_BD` | `#A7F3D0` | `0xA79A` | Green badge border |
+| `COL_GREEN_DK` | `#059669` | `0x04AD` | Green badge text / icon |
+| `COL_RED` | `#DC2626` | `0xD924` | Error / offline states |
+| `COL_RED_LT` | `#FEF2F2` | `0xFF9E` | Red badge background |
+
+### Helper Functions
+
+| Function | Purpose |
+|----------|---------|
+| `drawWordmark(cx, y, size)` | Renders two-tone bitmap wordmark (38px or 22px) |
+| `drawHeader(pillText, pillBg, pillBd, pillTx, dot)` | 44px header with left wordmark and optional right pill |
+| `drawFooter(text)` | FreeMono9pt, BC_DATUM, muted, bottom of screen |
+| `drawPill(cx, cy, text, bg, bd, tx, dot, dotc)` | Rounded pill chip with optional coloured dot |
+| `displayBoot(progress)` | Full boot screen draw (initial call) |
+| `bootProgress(pct, status)` | Updates boot bar + status text without full redraw |
+| `getDateLine()` | Returns `"Mon 13 May · 09:45"` formatted string |
+
+### Screen Inventory
+
+| Screen function | State | Description |
+|----------------|-------|-------------|
+| `displayBoot()` | startup | Wordmark centred, animated 200px progress bar (0→100%), status text, ≥4s hold |
+| `displayIdle()` | `STATE_IDLE` | Wordmark hero, "Ready for next sale", READY green pill, date line, throttled 60s |
+| `drawQR()` | `STATE_WAITING_CLAIM` | Receipt card with QR, Slip# label, Print/Cancel buttons, countdown footer |
+| `drawNfcLinking()` | NFC tap moment | Blue NFC disc + concentric rings, "Card detected", UID, "Claiming slip…" |
+| `drawClaimed()` | `STATE_CLAIMED` | Green checkmark disc, "Slip claimed", NFC vs QR attribution, VERIFIED pill, 9s hold |
+| `drawCancelled()` | `STATE_CANCELLED` | X-circle, "Print cancelled", 24h claimability note, 3s hold |
+| `drawPrinting()` | `STATE_PRINTING` | faint ring + drawArc spinner, "Printing slip", Slip#, 3s post-print hold |
+| `drawOffline()` | `STATE_OFFLINE` | Red disc, "Lost connection", queue depth card, "check router" footer |
+
+### Boot Sequence
+
+`setup()` keeps the boot screen visible throughout startup:
+1. `displayBoot(0)` — full draw
+2. WiFi connect loop (0→45%) with "CONNECTING..." status
+3. NTP sync loop (45→90%) with "SYNCING TIME..." status
+4. `bootProgress(100, "READY")`, hold for ≥4s total
+5. Transition to `STATE_IDLE`
+
+The "Connecting to WiFi", "WiFi OK / IP / Time synced", "Receiving...", "Loading..." screens from v2.1 are **removed**. The boot screen is the only startup screen.
 
 ---
 
@@ -89,19 +171,14 @@ Keep on-screen status text brief and user-facing (e.g. "Loading...", "Linking...
 | **Supabase** | `https://eivctqjisodfhaitzyiq.supabase.co` — REST API for slip insert/poll, edge functions for NFC claim |
 | **Web claim page** | `https://digislips.co.za/slip/<uuid>` — Vercel-hosted static HTML, reads Supabase |
 | **Backend repo** | `digislip-backend` (GitHub JoeBurd-code) — edge function source |
-| **App repo** | `digislip-app` — React Native (Expo) mobile app, theme constants at `src/constants/theme.ts` |
+| **App repo** | `digislip-app` — React Native (Expo) mobile app |
 
 ---
 
-## Brand Palette (RGB565 — from digislip-app/src/constants/theme.ts)
+## TDD Test Suite
 
-| Name | Hex | RGB565 | Use |
-|------|-----|--------|-----|
-| `COL_BG` | `#E8E4DA` | `0xEF3B` | Screen background |
-| `COL_CARD` | `#FEFDFB` | `0xFFFF` | QR card surface |
-| `COL_FG` | `#1C1917` | `0x18C2` | Dark text |
-| `COL_ACCENT` | `#1558FF` | `0x12DF` | Brand blue — header bar, clock |
-| `COL_SUCCESS` | `#00C96A` | `0x064D` | Print button, claimed state |
-| `COL_ERROR` | `#DC2626` | `0xD924` | Error states |
-| `COL_MUTED` | `#78716C` | `0x7B8D` | Secondary text, Cancel button outline |
-| `COL_FAINT` | `#D6D3CD` | `0xD699` | Dividers, footer text |
+`DigiSlip_ONX3248G035/test_firmware_design_system.py` — 57 source-level pytest tests.
+
+No hardware needed. Tests parse the `.ino` source and verify structural requirements: palette constants + RGB565 values, helper function definitions, screen layout choices, state machine wiring, and timing.
+
+Run: `cd DigiSlip_ONX3248G035 && python -m pytest test_firmware_design_system.py -v`
