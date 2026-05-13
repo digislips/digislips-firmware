@@ -159,8 +159,10 @@ enum SystemState {
   STATE_UPLOADING,       // POST to Supabase
   STATE_WAITING_CLAIM,   // show QR, poll Supabase, listen for NFC / button
   STATE_CLAIMED,         // digital claim confirmed — no print
+  STATE_CANCELLED,       // 1-second confirmation after cashier cancels
   STATE_PRINTING,        // forwarding buffer to printer
   STATE_OFFLINE_QUEUE,   // WiFi down — store in NVS, retry later
+  STATE_OFFLINE,         // WiFi lost >30 s — dedicated offline screen
   STATE_ERROR            // recoverable error display
 };
 
@@ -594,6 +596,41 @@ void drawPrinting() {
   tft.drawString(("Slip #" + String(txCounter)).c_str(), SCREEN_WIDTH / 2, 248);
 
   drawFooter(TILL_ID "  v2.2");
+}
+
+// =============================================================================
+//  ── CANCELLED SCREEN ─────────────────────────────────────────────────────────
+// =============================================================================
+
+void drawCancelled() {
+  tft.fillScreen(COL_BG);
+  drawHeader(nullptr, 0, 0, 0, false);
+
+  // X circle
+  int cx = SCREEN_WIDTH / 2;
+  int cy = 152;
+  tft.drawCircle(cx, cy, 40, COL_FAINT);
+  tft.drawCircle(cx, cy, 39, COL_FAINT);
+  // X arms
+  tft.drawLine(cx - 17, cy - 17, cx + 17, cy + 17, COL_MUTED);
+  tft.drawLine(cx - 17, cy - 16, cx + 17, cy + 16, COL_MUTED);
+  tft.drawLine(cx + 17, cy - 17, cx - 17, cy + 17, COL_MUTED);
+  tft.drawLine(cx + 17, cy - 16, cx - 17, cy + 16, COL_MUTED);
+
+  // Headline
+  tft.setFreeFont(&FreeSansBold9pt7b);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(COL_FG, COL_BG);
+  tft.drawString("Print cancelled", SCREEN_WIDTH / 2, 218);
+
+  // Body copy
+  tft.setFreeFont(&FreeMono9pt7b);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(COL_MUTED, COL_BG);
+  tft.drawString("No paper slip will print.", SCREEN_WIDTH / 2, 252);
+  tft.drawString("Digital slip claimable 24h.", SCREEN_WIDTH / 2, 272);
+
+  drawFooter("Returning to idle...");
 }
 
 // =============================================================================
@@ -1043,8 +1080,7 @@ void loop() {
             receiptLineCount = 0;
             slipId           = "";
             nfcUID           = "";
-            currentState     = STATE_IDLE;
-            lastIdleRefresh  = 0;
+            currentState     = STATE_CANCELLED;
             break;
           }
         }
@@ -1122,6 +1158,21 @@ void loop() {
       nfcUID           = "";
       currentState     = STATE_IDLE;
       lastIdleRefresh  = 0;
+      break;
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    case STATE_CANCELLED: {
+      static unsigned long cancelledAt = 0;
+      if (cancelledAt == 0) {
+        drawCancelled();
+        cancelledAt = millis();
+      }
+      if (millis() - cancelledAt >= 1000) {
+        cancelledAt     = 0;
+        currentState    = STATE_IDLE;
+        lastIdleRefresh = 0;
+      }
       break;
     }
 
