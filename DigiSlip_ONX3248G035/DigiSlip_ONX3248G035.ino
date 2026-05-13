@@ -168,6 +168,9 @@ enum SystemState {
 
 SystemState currentState = STATE_IDLE;
 
+enum ClaimMethod { CLAIM_NONE, CLAIM_NFC, CLAIM_QR };
+ClaimMethod claimMethod = CLAIM_NONE;
+
 // =============================================================================
 //  ── SESSION DATA ─────────────────────────────────────────────────────────────
 // =============================================================================
@@ -651,6 +654,47 @@ void drawCancelled() {
 }
 
 // =============================================================================
+//  ── CLAIMED SCREEN ───────────────────────────────────────────────────────────
+// =============================================================================
+
+void drawClaimed() {
+  tft.fillScreen(COL_BG);
+  drawHeader(nullptr, 0, 0, 0, false);
+
+  // Green disc with checkmark
+  int cx = SCREEN_WIDTH / 2;
+  int cy = 148;
+  tft.fillCircle(cx, cy, 44, COL_GREEN_LT);
+  tft.drawCircle(cx, cy, 44, COL_GREEN_BD);
+  tft.drawCircle(cx, cy, 43, COL_GREEN_BD);
+  // Checkmark
+  tft.drawLine(cx - 18, cy,      cx - 6,  cy + 14, COL_GREEN_DK);
+  tft.drawLine(cx - 18, cy + 1,  cx - 6,  cy + 15, COL_GREEN_DK);
+  tft.drawLine(cx - 6,  cy + 14, cx + 18, cy - 14, COL_GREEN_DK);
+  tft.drawLine(cx - 6,  cy + 15, cx + 18, cy - 13, COL_GREEN_DK);
+
+  // Headline
+  tft.setFreeFont(&FreeSansBold9pt7b);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(COL_FG, COL_BG);
+  tft.drawString("Slip claimed", SCREEN_WIDTH / 2, 220);
+
+  // Via attribution
+  tft.setFreeFont(&FreeMono9pt7b);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(COL_MUTED, COL_BG);
+  const char* via = (claimMethod == CLAIM_NFC) ? "Claimed via NFC card"
+                                                : "Claimed via QR / App";
+  tft.drawString(via, SCREEN_WIDTH / 2, 252);
+
+  // VERIFIED pill
+  drawPill(SCREEN_WIDTH / 2, 292, "VERIFIED", COL_GREEN_LT, COL_GREEN_BD, COL_GREEN_DK, true, COL_GREEN);
+  tft.setTextDatum(MC_DATUM);
+
+  drawFooter(TILL_ID "  returning to idle");
+}
+
+// =============================================================================
 //  ── OFFLINE SCREEN ───────────────────────────────────────────────────────────
 // =============================================================================
 
@@ -1106,6 +1150,7 @@ void loop() {
         lastPollTime = millis();
         if (supabaseIsClaimed(slipId)) {
           Serial.println("[Claim] Slip claimed via QR/app");
+          claimMethod  = CLAIM_QR;
           currentState = STATE_CLAIMED;
           break;
         }
@@ -1167,6 +1212,7 @@ void loop() {
                             : "[NFC] nfc-claim failed — slip not linked to user");
         }
 
+        claimMethod  = CLAIM_NFC;
         currentState = STATE_CLAIMED;
         break;
       }
@@ -1198,16 +1244,22 @@ void loop() {
 
     // ──────────────────────────────────────────────────────────────────────────
     case STATE_CLAIMED: {
-      displayMessage("Claimed!", "Saved to your app");
-      Serial.println("[SYS] Digital claim complete. Print blocked.");
-      delay(2500);
-
-      printBufferLen   = 0;
-      receiptLineCount = 0;
-      slipId           = "";
-      nfcUID           = "";
-      currentState     = STATE_IDLE;
-      lastIdleRefresh  = 0;
+      static unsigned long claimedAt = 0;
+      if (claimedAt == 0) {
+        drawClaimed();
+        Serial.println("[SYS] Digital claim complete. Print blocked.");
+        claimedAt = millis();
+      }
+      if (millis() - claimedAt >= 3000) {
+        claimedAt        = 0;
+        claimMethod      = CLAIM_NONE;
+        printBufferLen   = 0;
+        receiptLineCount = 0;
+        slipId           = "";
+        nfcUID           = "";
+        currentState     = STATE_IDLE;
+        lastIdleRefresh  = 0;
+      }
       break;
     }
 

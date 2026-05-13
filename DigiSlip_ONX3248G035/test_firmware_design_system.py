@@ -556,3 +556,106 @@ def test_offline_footer_check_router():
     body = _offline_body()
     assert "check router" in body, \
         'Footer "check router" not found in drawOffline()'
+
+
+# =============================================================================
+#  Issue #8 — Claimed screen with ClaimMethod attribution
+# =============================================================================
+
+def _claimed_body():
+    m = re.search(r"void\s+drawClaimed\s*\(\s*\)(.*?)(?=\nvoid\s+\w)", SOURCE, re.DOTALL)
+    assert m, "Could not locate drawClaimed() body"
+    return m.group(1)
+
+def _claimed_state_body():
+    m = re.search(r"case\s+STATE_CLAIMED\s*:(.*?)(?=case\s+STATE_|\bdefault\b)", SOURCE, re.DOTALL)
+    assert m, "Could not locate STATE_CLAIMED body"
+    return m.group(1)
+
+
+# ── Behavior 1: ClaimMethod enum and global declared ─────────────────────────
+
+def test_claim_method_enum_declared():
+    assert "CLAIM_NFC" in SOURCE, "CLAIM_NFC not found in ClaimMethod enum"
+    assert "CLAIM_QR" in SOURCE, "CLAIM_QR not found in ClaimMethod enum"
+    assert re.search(r"\bclaimMethod\b", SOURCE), "claimMethod global not declared"
+
+
+# ── Behavior 2: NFC path sets CLAIM_NFC before STATE_CLAIMED ─────────────────
+
+def test_nfc_path_sets_claim_nfc():
+    m = re.search(
+        r"NFC\] Slip claimed(.*?)currentState\s*=\s*STATE_CLAIMED",
+        SOURCE, re.DOTALL
+    )
+    assert m, "Could not find NFC claim → STATE_CLAIMED block"
+    assert "CLAIM_NFC" in m.group(1), \
+        "NFC path does not set claimMethod = CLAIM_NFC before STATE_CLAIMED"
+
+
+# ── Behavior 3: QR/poll path sets CLAIM_QR before STATE_CLAIMED ──────────────
+
+def test_qr_path_sets_claim_qr():
+    m = re.search(
+        r"QR/app(.*?)currentState\s*=\s*STATE_CLAIMED",
+        SOURCE, re.DOTALL
+    )
+    assert m, "Could not find QR/app claim → STATE_CLAIMED block"
+    assert "CLAIM_QR" in m.group(1), \
+        "QR/app poll path does not set claimMethod = CLAIM_QR before STATE_CLAIMED"
+
+
+# ── Behavior 4: drawClaimed() defined and called from STATE_CLAIMED ──────────
+
+def test_drawClaimed_defined_and_called():
+    assert re.search(r"\bvoid\s+drawClaimed\s*\(\s*\)", SOURCE), \
+        "drawClaimed() not defined"
+    body = _claimed_state_body()
+    assert "drawClaimed(" in body, \
+        "drawClaimed() not called in STATE_CLAIMED"
+
+
+# ── Behavior 5: header with no pill ──────────────────────────────────────────
+
+def test_claimed_header_no_pill():
+    body = _claimed_body()
+    m = re.search(r"drawHeader\s*\(\s*(.*?)\s*,", body)
+    assert m, "drawHeader() not found in drawClaimed()"
+    assert m.group(1).strip() == "nullptr", \
+        "drawClaimed() should call drawHeader(nullptr, …) — no pill"
+
+
+# ── Behavior 6: "Slip claimed" headline ──────────────────────────────────────
+
+def test_claimed_headline_text():
+    body = _claimed_body()
+    assert "Slip claimed" in body, \
+        '"Slip claimed" headline not found in drawClaimed()'
+
+
+# ── Behavior 7: claimMethod read in drawClaimed() for "via" string ───────────
+
+def test_claimed_reads_claim_method():
+    body = _claimed_body()
+    assert "claimMethod" in body, \
+        "claimMethod not read in drawClaimed() — via attribution missing"
+    assert "CLAIM_NFC" in body, \
+        "CLAIM_NFC branch not found in drawClaimed()"
+
+
+# ── Behavior 8: footer "returning to idle" ───────────────────────────────────
+
+def test_claimed_footer_returning_to_idle():
+    body = _claimed_body()
+    assert re.search(r"returning\s+to\s+idle", body, re.IGNORECASE), \
+        'Footer "returning to idle" not found in drawClaimed()'
+
+
+# ── Behavior 9: STATE_CLAIMED holds 3 s then returns to STATE_IDLE ───────────
+
+def test_claimed_state_holds_3s_then_idle():
+    body = _claimed_state_body()
+    assert re.search(r"3000", body), \
+        "3000 ms hold not found in STATE_CLAIMED"
+    assert "STATE_IDLE" in body, \
+        "STATE_CLAIMED does not transition to STATE_IDLE"
