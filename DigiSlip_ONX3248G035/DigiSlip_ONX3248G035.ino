@@ -462,13 +462,24 @@ void drawFooter(const char* text) {
 void displayBoot(int progress) {
   tft.fillScreen(COL_BG);
   drawWordmark(SCREEN_WIDTH / 2, 215, 38);
-  tft.fillRect(110, 268, 100, 3, COL_FAINT);
-  if (progress > 0) tft.fillRect(110, 268, progress, 3, COL_BLUE);
+  tft.fillRect(60, 268, 200, 3, COL_FAINT);
+  if (progress > 0) tft.fillRect(60, 268, (progress * 200) / 100, 3, COL_BLUE);
   tft.setFreeFont(&FreeMono9pt7b);
   tft.setTextDatum(MC_DATUM);
   tft.setTextColor(COL_MUTED, COL_BG);
   tft.drawString("STARTING UP", SCREEN_WIDTH / 2, 286);
   drawFooter(TILL_ID "  v2.2");
+}
+
+void bootProgress(int pct, const char* status) {
+  tft.fillRect(60, 265, 200, 9, COL_BG);
+  tft.fillRect(60, 268, 200, 3, COL_FAINT);
+  if (pct > 0) tft.fillRect(60, 268, (pct * 200) / 100, 3, COL_BLUE);
+  tft.fillRect(0, 278, SCREEN_WIDTH, 16, COL_BG);
+  tft.setFreeFont(&FreeMono9pt7b);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(COL_MUTED, COL_BG);
+  tft.drawString(status, SCREEN_WIDTH / 2, 286);
 }
 
 void displayMessage(const char* line1,
@@ -496,7 +507,7 @@ void displayMessage(const char* line1,
 }
 
 void displayIdle() {
-  if (millis() - lastIdleRefresh < 60000) return;
+  if (lastIdleRefresh != 0 && millis() - lastIdleRefresh < 60000) return;
   lastIdleRefresh = millis();
 
   tft.fillScreen(COL_BG);
@@ -616,6 +627,45 @@ void drawPrinting() {
   tft.drawString(("Slip #" + String(txCounter)).c_str(), SCREEN_WIDTH / 2, 248);
 
   drawFooter(TILL_ID "  v2.2");
+}
+
+// =============================================================================
+//  ── NFC LINKING SCREEN ───────────────────────────────────────────────────────
+// =============================================================================
+
+void drawNfcLinking(const String& uid) {
+  tft.fillScreen(COL_BG);
+  drawHeader(nullptr, 0, 0, 0, false);
+
+  // Concentric rings (outermost first, faint)
+  int cx = SCREEN_WIDTH / 2;
+  int cy = 150;
+  tft.drawCircle(cx, cy, 56, COL_FAINT);
+  tft.drawCircle(cx, cy, 44, COL_FAINT);
+  tft.drawCircle(cx, cy, 32, COL_FAINT);
+
+  // Blue NFC disc
+  tft.fillCircle(cx, cy, 24, COL_BLUE);
+
+  // NFC symbol — three right-facing arcs inside disc
+  tft.drawArc(cx, cy, 18, 15, 315, 45, 0xFFFF, COL_BLUE);
+  tft.drawArc(cx, cy, 12, 9,  315, 45, 0xFFFF, COL_BLUE);
+  tft.drawArc(cx, cy,  6, 3,  315, 45, 0xFFFF, COL_BLUE);
+
+  // Headline
+  tft.setFreeFont(&FreeSansBold9pt7b);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(COL_FG, COL_BG);
+  tft.drawString("Card detected", SCREEN_WIDTH / 2, 224);
+
+  // UID and status
+  tft.setFreeFont(&FreeMono9pt7b);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(COL_MUTED, COL_BG);
+  tft.drawString(uid.c_str(), SCREEN_WIDTH / 2, 254);
+  tft.drawString("Claiming slip...", SCREEN_WIDTH / 2, 274);
+
+  drawFooter("HOLD CARD ON READER");
 }
 
 // =============================================================================
@@ -1016,16 +1066,42 @@ void setup() {
   // ── Button — 24-pin header IO38 ─────────────────────────────────────────────
   pinMode(BUTTON_PIN, INPUT_PULLUP);
 
-  // ── WiFi ────────────────────────────────────────────────────────────────────
-  displayMessage("Connecting", "to WiFi...");
-  wifiConnect();
+  // ── WiFi — boot screen stays visible throughout ──────────────────────────────
+  unsigned long bootStart = millis();
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  for (int i = 0; i < 20 && WiFi.status() != WL_CONNECTED; i++) {
+    bootProgress(5 + i * 2, "CONNECTING...");
+    delay(500);
+  }
 
   if (WiFi.status() == WL_CONNECTED) {
-    displayMessage("WiFi OK", WiFi.localIP().toString().c_str(), "Time synced");
+    Serial.println("[WiFi] Connected: " + WiFi.localIP().toString());
+    bootProgress(45, "SYNCING TIME...");
+    configTime(TZ_OFFSET, 0, NTP_SERVER);
+    time_t now = 0;
+    for (int i = 0; i < 20 && now < 100000; i++) {
+      bootProgress(45 + i * 2, "SYNCING TIME...");
+      delay(500);
+      time(&now);
+    }
+    if (now > 100000) {
+      Serial.println("[NTP] Synced");
+      bootProgress(90, "TIME SYNCED");
+    } else {
+      Serial.println("[NTP] FAILED — will retry");
+      bootProgress(90, "TIME FAILED");
+    }
   } else {
-    displayMessage("WiFi Failed", "Offline mode", "Queue active");
+    Serial.println("[WiFi] FAILED — offline mode");
+    bootProgress(50, "OFFLINE MODE");
   }
-  delay(1500);
+
+  bootProgress(100, "READY");
+
+  // Hold boot screen for at least 4 s so user can see it
+  long remaining = 4000 - (long)(millis() - bootStart);
+  if (remaining > 0) delay((unsigned long)remaining);
 
   // ── Ready ───────────────────────────────────────────────────────────────────
   currentState    = STATE_IDLE;
@@ -1067,7 +1143,6 @@ void loop() {
         slipId           = "";
         nfcUID           = "";
         currentState     = STATE_BUFFERING;
-        displayMessage("Receiving...");
         Serial.println("[UART] Data incoming — buffering");
       }
       break;
@@ -1098,7 +1173,6 @@ void loop() {
         saveTxCounter(txCounter);
 
         currentState = STATE_UPLOADING;
-        displayMessage("Loading...", ("TX #" + String(txCounter)).c_str());
       }
       break;
     }
@@ -1204,7 +1278,7 @@ void loop() {
         nfcUID.toUpperCase();
         Serial.println("[NFC] UID: " + nfcUID);
 
-        displayMessage("Linking...", nfcUID.substring(0, 17).c_str());
+        drawNfcLinking(nfcUID);
 
         if (slipId.length() > 0) {
           bool ok = supabaseNfcClaim(slipId, nfcUID);
@@ -1250,7 +1324,7 @@ void loop() {
         Serial.println("[SYS] Digital claim complete. Print blocked.");
         claimedAt = millis();
       }
-      if (millis() - claimedAt >= 3000) {
+      if (millis() - claimedAt >= 9000) {
         claimedAt        = 0;
         claimMethod      = CLAIM_NONE;
         printBufferLen   = 0;
@@ -1270,7 +1344,7 @@ void loop() {
         drawCancelled();
         cancelledAt = millis();
       }
-      if (millis() - cancelledAt >= 1000) {
+      if (millis() - cancelledAt >= 3000) {
         cancelledAt     = 0;
         currentState    = STATE_IDLE;
         lastIdleRefresh = 0;
@@ -1280,12 +1354,11 @@ void loop() {
 
     // ──────────────────────────────────────────────────────────────────────────
     case STATE_PRINTING: {
-      static bool printStarted = false;
-      static int  spinAngle    = 0;
+      static unsigned long printDoneAt = 0;
+      static int  spinAngle = 0;
       static unsigned long lastSpin = 0;
 
-      if (!printStarted) {
-        printStarted = true;
+      if (printDoneAt == 0) {
         drawPrinting();
         Serial.println("[PRINT] Forwarding " +
                        String(printBufferLen) + " bytes to printer");
@@ -1296,10 +1369,7 @@ void loop() {
         receiptLineCount = 0;
         slipId           = "";
         nfcUID           = "";
-        currentState     = STATE_IDLE;
-        lastIdleRefresh  = 0;
-        printStarted     = false;
-        break;
+        printDoneAt      = millis();
       }
 
       // Spinner animation — advance 10° every 28 ms
@@ -1310,6 +1380,14 @@ void loop() {
         tft.drawArc(cx, cy, 36, 30, spinAngle, spinAngle + 90, COL_BLUE, COL_BG);
         tft.drawArc(cx, cy, 36, 30, (spinAngle + 90) % 360, (spinAngle + 180) % 360, COL_FAINT, COL_BG);
         spinAngle = (spinAngle + 10) % 360;
+      }
+
+      // Hold for 3 s so user can see the printing screen
+      if (millis() - printDoneAt >= 3000) {
+        printDoneAt     = 0;
+        spinAngle       = 0;
+        currentState    = STATE_IDLE;
+        lastIdleRefresh = 0;
       }
       break;
     }
