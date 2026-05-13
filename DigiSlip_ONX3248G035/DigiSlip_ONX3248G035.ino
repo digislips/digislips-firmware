@@ -446,7 +446,7 @@ void displayBoot(int progress) {
   tft.setTextDatum(MC_DATUM);
   tft.setTextColor(COL_MUTED, COL_BG);
   tft.drawString("STARTING UP", SCREEN_WIDTH / 2, 286);
-  drawFooter("v2.2  " TILL_ID "  ESP32-S3");
+  drawFooter(TILL_ID "  v2.2");
 }
 
 void displayMessage(const char* line1,
