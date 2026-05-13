@@ -486,7 +486,7 @@ void displayIdle() {
   tft.drawString("PAPERLESS TILL SLIPS", SCREEN_WIDTH / 2, 148);
 
   // Headline
-  tft.setFreeFont(&FreeSansBold18pt7b);
+  tft.setFreeFont(&FreeSansBold12pt7b);
   tft.setTextColor(COL_FG, COL_BG);
   tft.drawString("Ready for next sale", SCREEN_WIDTH / 2, 220);
 
