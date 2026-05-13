@@ -457,3 +457,102 @@ def test_cancelled_state_holds_1s_then_idle():
         "1000 ms hold not found in STATE_CANCELLED"
     assert "STATE_IDLE" in body, \
         "STATE_CANCELLED does not transition to STATE_IDLE"
+
+
+# =============================================================================
+#  Issue #7 — Offline screen + STATE_OFFLINE + WiFi watchdog
+# =============================================================================
+
+def _offline_body():
+    m = re.search(r"void\s+drawOffline\s*\(\s*\)(.*?)(?=\nvoid\s+\w)", SOURCE, re.DOTALL)
+    assert m, "Could not locate drawOffline() body"
+    return m.group(1)
+
+def _offline_state_body():
+    m = re.search(r"case\s+STATE_OFFLINE\s*:(.*?)(?=case\s+STATE_|\bdefault\b)", SOURCE, re.DOTALL)
+    assert m, "Could not locate STATE_OFFLINE body"
+    return m.group(1)
+
+def _watchdog_body():
+    m = re.search(r"void\s+wifiWatchdog\s*\(\s*\)(.*?)(?=\n\S)", SOURCE, re.DOTALL)
+    assert m, "Could not locate wifiWatchdog() body"
+    return m.group(1)
+
+
+# ── Behavior 1: globals wifiLostTime + preOfflineState declared ───────────────
+
+def test_offline_globals_declared():
+    assert "wifiLostTime" in SOURCE, "wifiLostTime global not found"
+    assert "preOfflineState" in SOURCE, "preOfflineState global not found"
+
+
+# ── Behavior 2: wifiWatchdog transitions to STATE_OFFLINE after 30 s ─────────
+
+def test_watchdog_transitions_offline_after_30s():
+    body = _watchdog_body()
+    assert "STATE_OFFLINE" in body, \
+        "wifiWatchdog() does not transition to STATE_OFFLINE"
+    assert "30000" in body, \
+        "30 s threshold (30000 ms) not found in wifiWatchdog()"
+
+
+# ── Behavior 3: preOfflineState saved before entering STATE_OFFLINE ──────────
+
+def test_watchdog_saves_pre_offline_state():
+    body = _watchdog_body()
+    assert "preOfflineState" in body, \
+        "preOfflineState not saved in wifiWatchdog()"
+
+
+# ── Behavior 4: reconnect restores preOfflineState ───────────────────────────
+
+def test_watchdog_restores_state_on_reconnect():
+    body = _watchdog_body()
+    assert re.search(r"currentState\s*=\s*preOfflineState", body), \
+        "currentState not restored to preOfflineState on reconnect in wifiWatchdog()"
+
+
+# ── Behavior 5: drawOffline() defined and called from STATE_OFFLINE ──────────
+
+def test_drawOffline_defined_and_called():
+    assert re.search(r"\bvoid\s+drawOffline\s*\(\s*\)", SOURCE), \
+        "drawOffline() not defined"
+    body = _offline_state_body()
+    assert "drawOffline(" in body, \
+        "drawOffline() not called in STATE_OFFLINE"
+
+
+# ── Behavior 6: header has "Offline" red pill ────────────────────────────────
+
+def test_offline_header_has_offline_pill():
+    body = _offline_body()
+    m = re.search(r"drawHeader\s*\(\s*(.*?)\s*,", body)
+    assert m, "drawHeader() not found in drawOffline()"
+    assert m.group(1).strip() != "nullptr", \
+        "drawHeader() called with nullptr in drawOffline() — expected Offline pill"
+    assert "Offline" in body, \
+        '"Offline" pill text not found in drawOffline()'
+
+
+# ── Behavior 7: "Lost connection" headline ───────────────────────────────────
+
+def test_offline_headline_text():
+    body = _offline_body()
+    assert "Lost connection" in body, \
+        '"Lost connection" headline not found in drawOffline()'
+
+
+# ── Behavior 8: queued slip count shown in STATE_OFFLINE ─────────────────────
+
+def test_offline_shows_queue_depth():
+    body = _offline_state_body()
+    assert "offlineQueueLen" in body, \
+        "offlineQueueLen() not called in STATE_OFFLINE — queue depth not shown"
+
+
+# ── Behavior 9: footer reads "check router" ──────────────────────────────────
+
+def test_offline_footer_check_router():
+    body = _offline_body()
+    assert "check router" in body, \
+        'Footer "check router" not found in drawOffline()'
