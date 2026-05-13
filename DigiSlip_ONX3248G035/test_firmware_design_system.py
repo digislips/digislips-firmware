@@ -374,3 +374,86 @@ def test_printing_state_returns_to_idle():
     body = _printing_state_body()
     assert "STATE_IDLE" in body, \
         "STATE_PRINTING does not transition to STATE_IDLE"
+
+
+# =============================================================================
+#  Issue #6 — Cancelled screen + STATE_CANCELLED hold
+# =============================================================================
+
+def _cancelled_body():
+    m = re.search(r"void\s+drawCancelled\s*\(\s*\)(.*?)(?=\nvoid\s+\w)", SOURCE, re.DOTALL)
+    assert m, "Could not locate drawCancelled() body"
+    return m.group(1)
+
+def _cancelled_state_body():
+    m = re.search(r"case\s+STATE_CANCELLED\s*:(.*?)(?=case\s+STATE_|\bdefault\b)", SOURCE, re.DOTALL)
+    assert m, "Could not locate STATE_CANCELLED body"
+    return m.group(1)
+
+def _cancel_touch_branch():
+    m = re.search(r"Cancel tapped(.*?)(?=//\s*\d+\.|break\s*;\s*\})", SOURCE, re.DOTALL)
+    assert m, "Could not locate cancel-tapped branch"
+    return m.group(1)
+
+
+# ── Behavior 1: STATE_CANCELLED in enum, Cancel button uses it ───────────────
+
+def test_state_cancelled_in_enum_and_cancel_button():
+    assert "STATE_CANCELLED" in SOURCE, "STATE_CANCELLED not added to enum"
+    branch = _cancel_touch_branch()
+    assert "STATE_CANCELLED" in branch, \
+        "Cancel touch branch does not set STATE_CANCELLED"
+
+
+# ── Behavior 2: drawCancelled() defined and wired to STATE_CANCELLED ─────────
+
+def test_drawCancelled_defined_and_called():
+    assert re.search(r"\bvoid\s+drawCancelled\s*\(\s*\)", SOURCE), \
+        "drawCancelled() not defined"
+    body = _cancelled_state_body()
+    assert "drawCancelled(" in body, \
+        "drawCancelled() not called in STATE_CANCELLED"
+
+
+# ── Behavior 3: header with no pill ──────────────────────────────────────────
+
+def test_cancelled_header_no_pill():
+    body = _cancelled_body()
+    m = re.search(r"drawHeader\s*\(\s*(.*?)\s*,", body)
+    assert m, "drawHeader() not found in drawCancelled()"
+    assert m.group(1).strip() == "nullptr", \
+        "drawCancelled() should call drawHeader(nullptr, …) — no pill"
+
+
+# ── Behavior 4: "Print cancelled" headline ───────────────────────────────────
+
+def test_cancelled_headline_text():
+    body = _cancelled_body()
+    assert "Print cancelled" in body, \
+        '"Print cancelled" headline not found in drawCancelled()'
+
+
+# ── Behavior 5: body copy mentions 24h claimability ──────────────────────────
+
+def test_cancelled_body_mentions_24h():
+    body = _cancelled_body()
+    assert "24" in body, \
+        "drawCancelled() body does not mention 24h claimability"
+
+
+# ── Behavior 6: footer reads "Returning to idle" ─────────────────────────────
+
+def test_cancelled_footer_returning_to_idle():
+    body = _cancelled_body()
+    assert re.search(r"[Rr]eturning\s+to\s+idle", body), \
+        'Footer "Returning to idle" not found in drawCancelled()'
+
+
+# ── Behavior 7: STATE_CANCELLED holds ~1 s then goes to STATE_IDLE ───────────
+
+def test_cancelled_state_holds_1s_then_idle():
+    body = _cancelled_state_body()
+    assert re.search(r"1000", body), \
+        "1000 ms hold not found in STATE_CANCELLED"
+    assert "STATE_IDLE" in body, \
+        "STATE_CANCELLED does not transition to STATE_IDLE"
