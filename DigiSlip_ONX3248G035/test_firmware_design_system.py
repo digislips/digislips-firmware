@@ -210,3 +210,82 @@ def test_idle_header_has_online_pill():
     first_arg = m.group(1).strip()
     assert first_arg != "nullptr", \
         "drawHeader() called with nullptr pill in displayIdle() — expected Online pill"
+
+
+# =============================================================================
+#  Issue #4 — Claim screen redesign
+# =============================================================================
+
+def _qr_body():
+    m = re.search(r"void\s+drawQR\s*\(.*?\)(.*?)(?=\nvoid\s+\w)", SOURCE, re.DOTALL)
+    assert m, "Could not locate drawQR() body"
+    return m.group(1)
+
+def _waiting_claim_body():
+    m = re.search(r"case\s+STATE_WAITING_CLAIM\s*:(.*?)(?=case\s+STATE_|\}\s*$)", SOURCE, re.DOTALL)
+    assert m, "Could not locate STATE_WAITING_CLAIM body"
+    return m.group(1)
+
+
+# ── Behavior 1: header has Awaiting claim pill ────────────────────────────────
+
+def test_qr_header_has_awaiting_claim_pill():
+    body = _qr_body()
+    m = re.search(r"drawHeader\s*\(\s*(.*?)\s*,", body)
+    assert m, "drawHeader() not found in drawQR()"
+    assert m.group(1).strip() != "nullptr", \
+        "drawHeader() called with nullptr in drawQR() — expected Awaiting claim pill"
+
+
+# ── Behavior 2: QR rendered at scale 5 ───────────────────────────────────────
+
+def test_qr_scale_5():
+    body = _qr_body()
+    assert re.search(r"\bscale\s*=\s*5\b", body), \
+        "QR scale not set to 5 in drawQR()"
+
+
+# ── Behavior 3: receipt card at x=22 ─────────────────────────────────────────
+
+def test_qr_card_at_x22():
+    body = _qr_body()
+    assert re.search(r"cardX\s*=\s*22\b", body), \
+        "Receipt card x-origin (cardX) not 22 in drawQR()"
+
+
+# ── Behavior 4: txCounter in Slip label ──────────────────────────────────────
+
+def test_qr_slip_label_uses_txCounter():
+    body = _qr_body()
+    assert "txCounter" in body, "txCounter not used in Slip label in drawQR()"
+
+
+# ── Behavior 5: Print button at BTN_PRINT_X / BTN_PRINT_Y ───────────────────
+
+def test_qr_print_button_geometry():
+    body = _qr_body()
+    assert "BTN_PRINT_X" in body and "BTN_PRINT_Y" in body, \
+        "Print button not using BTN_PRINT_X / BTN_PRINT_Y in drawQR()"
+
+
+# ── Behavior 6: Cancel button at BTN_CANCEL_X / BTN_CANCEL_Y ────────────────
+
+def test_qr_cancel_button_geometry():
+    body = _qr_body()
+    assert "BTN_CANCEL_X" in body and "BTN_CANCEL_Y" in body, \
+        "Cancel button not using BTN_CANCEL_X / BTN_CANCEL_Y in drawQR()"
+
+
+# ── Behavior 7: NFC in scan caption ──────────────────────────────────────────
+
+def test_qr_caption_mentions_nfc():
+    body = _qr_body()
+    assert "NFC" in body, "Scan caption does not mention NFC in drawQR()"
+
+
+# ── Behavior 8: drawFooter called in STATE_WAITING_CLAIM ─────────────────────
+
+def test_waiting_claim_calls_drawFooter():
+    body = _waiting_claim_body()
+    assert "drawFooter(" in body, \
+        "drawFooter() not called in STATE_WAITING_CLAIM loop"
