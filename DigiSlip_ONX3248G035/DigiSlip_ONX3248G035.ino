@@ -373,7 +373,8 @@ void drawWordmark(int cx, int y, int size) {
 void drawPill(int cx, int cy, const char* text,
               uint16_t bg, uint16_t bd, uint16_t tx,
               bool dot, uint16_t dotc) {
-  tft.setFreeFont(&FreeSans9pt7b);
+  tft.setFreeFont(nullptr);
+  tft.setTextSize(2);
   int tw  = tft.textWidth(text);
   int pw  = tw + 24 + (dot ? 18 : 0);
   int ph  = 26;
@@ -391,6 +392,7 @@ void drawPill(int cx, int cy, const char* text,
     tft.setTextColor(tx, bg);
     tft.drawString(text, cx, cy);
   }
+  tft.setTextSize(1);
   tft.setTextDatum(MC_DATUM);  // always restore
 }
 
@@ -403,7 +405,8 @@ void drawHeader(const char* pillText,
   tft.drawBitmap(18 + DIGI_22_W,  y, SLIPS_22_BITMAP, SLIPS_22_W, SLIPS_22_H, COL_GREEN, COL_BG);
   tft.drawFastHLine(0, 44, SCREEN_WIDTH, COL_FAINT);
   if (pillText) {
-    tft.setFreeFont(&FreeSans9pt7b);
+    tft.setFreeFont(nullptr);
+    tft.setTextSize(2);
     int tw = tft.textWidth(pillText);
     int pw = tw + 24 + (dot ? 18 : 0);
     int ph = 24;
@@ -422,6 +425,7 @@ void drawHeader(const char* pillText,
       tft.drawString(pillText, x0 + pw / 2, 22);
     }
   }
+  tft.setTextSize(1);
   tft.setTextDatum(MC_DATUM);  // always restore
 }
 
