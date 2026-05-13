@@ -123,3 +123,94 @@ def test_no_setTextSize_in_helpers():
     assert helper_section_match, "Could not locate design-system helper section"
     assert "setTextSize" not in helper_section_match.group(1), \
         "setTextSize() found in design-system helpers — use setFreeFont() instead"
+
+
+# =============================================================================
+#  Issue #3 — Idle screen redesign
+# =============================================================================
+
+def _idle_body():
+    """Return the body of displayIdle() as a string, or fail the test."""
+    m = re.search(r"void\s+displayIdle\s*\(\s*\)(.*?)(?=\nvoid\s+\w)", SOURCE, re.DOTALL)
+    assert m, "Could not locate displayIdle() body"
+    return m.group(1)
+
+
+# ── Behavior 1: getDateLine defined ──────────────────────────────────────────
+
+def test_getDateLine_defined():
+    assert re.search(r"\bgetDateLine\s*\(", SOURCE), "getDateLine() not defined"
+
+
+# ── Behavior 2: getDateLine format ───────────────────────────────────────────
+
+def test_getDateLine_format():
+    m = re.search(r"String\s+getDateLine\s*\(\s*\)(.*?)(?=\n\S)", SOURCE, re.DOTALL)
+    assert m, "Could not locate getDateLine() body"
+    body = m.group(1)
+    assert "%a" in body, "Missing %a (weekday) in getDateLine strftime"
+    assert "%d" in body, "Missing %d (day) in getDateLine strftime"
+    assert "%b" in body, "Missing %b (month) in getDateLine strftime"
+    assert "%H:%M" in body, "Missing %H:%M (time) in getDateLine strftime"
+    assert "\xb7" in body or "\\xC2\\xB7" in body or "·" in body, \
+        "Missing middle dot separator in getDateLine"
+
+
+# ── Behavior 3: old idle elements removed ────────────────────────────────────
+
+def test_old_idle_elements_removed():
+    body = _idle_body()
+    assert "getTimeHHMM" not in body, "Large clock (getTimeHHMM) still in displayIdle()"
+    assert "txCounter" not in body,   "TX counter still in displayIdle()"
+    assert "offlineQueueLen" not in body, "Offline queue chip still in displayIdle()"
+
+
+# ── Behavior 4: 38px wordmark hero ───────────────────────────────────────────
+
+def test_idle_draws_wordmark_38():
+    body = _idle_body()
+    assert re.search(r"drawWordmark\s*\(.*?,\s*38\s*\)", body), \
+        "drawWordmark() not called with size 38 in displayIdle()"
+
+
+# ── Behavior 5: READY pill with green palette ─────────────────────────────────
+
+def test_idle_ready_pill_green():
+    body = _idle_body()
+    assert "drawPill(" in body, "drawPill() not called in displayIdle()"
+    assert "COL_GREEN" in body, "COL_GREEN not used in displayIdle() pill"
+
+
+# ── Behavior 6: getDateLine called ───────────────────────────────────────────
+
+def test_idle_calls_getDateLine():
+    body = _idle_body()
+    assert "getDateLine(" in body, "getDateLine() not called in displayIdle()"
+
+
+# ── Behavior 7: drawFooter called ────────────────────────────────────────────
+
+def test_idle_calls_drawFooter():
+    body = _idle_body()
+    assert "drawFooter(" in body, "drawFooter() not called in displayIdle()"
+
+
+# ── Behavior 8: refresh throttle ≥ 60 s ──────────────────────────────────────
+
+def test_idle_refresh_throttle_60s():
+    body = _idle_body()
+    m = re.search(r"lastIdleRefresh\s*<\s*(\d+)", body)
+    assert m, "Could not find lastIdleRefresh throttle in displayIdle()"
+    assert int(m.group(1)) >= 60000, \
+        f"Idle refresh throttle is {m.group(1)} ms — should be ≥ 60000"
+
+
+# ── Behavior 9: Online pill passed to drawHeader ─────────────────────────────
+
+def test_idle_header_has_online_pill():
+    body = _idle_body()
+    m = re.search(r"drawHeader\s*\(\s*(.*?)\s*,", body)
+    assert m, "drawHeader() not found in displayIdle()"
+    first_arg = m.group(1).strip()
+    assert first_arg != "nullptr", \
+        "drawHeader() called with nullptr pill in displayIdle() — expected Online pill"

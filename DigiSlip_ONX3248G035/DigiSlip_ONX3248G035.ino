@@ -293,6 +293,16 @@ String getTimeHHMM() {
   return String(buf);
 }
 
+String getDateLine() {
+  time_t now;
+  time(&now);
+  if (now < 100000) return "--";
+  struct tm* t = localtime(&now);
+  char buf[32];
+  strftime(buf, sizeof(buf), "%a %d %b \xC2\xB7 %H:%M", t);
+  return String(buf);
+}
+
 // =============================================================================
 //  ── WIFI MANAGEMENT ──────────────────────────────────────────────────────────
 // =============================================================================
@@ -458,48 +468,41 @@ void displayMessage(const char* line1,
 }
 
 void displayIdle() {
-  if (millis() - lastIdleRefresh < 5000) return;
+  if (millis() - lastIdleRefresh < 60000) return;
   lastIdleRefresh = millis();
 
   tft.fillScreen(COL_BG);
-  drawHeader(nullptr, 0, 0, 0, false);
 
-  // Large clock
+  // Header with Online pill
+  drawHeader("Online", COL_GREEN_LT, COL_GREEN_BD, COL_GREEN_DK, true);
+
+  // Wordmark hero
+  drawWordmark(SCREEN_WIDTH / 2, 92, 38);
+
+  // Tagline
+  tft.setFreeFont(&FreeMono9pt7b);
   tft.setTextDatum(MC_DATUM);
-  tft.setTextColor(COL_BLUE, COL_BG);
-  tft.setTextSize(6);
-  tft.drawString(getTimeHHMM(), SCREEN_WIDTH / 2, 135);
-
-  // Divider
-  tft.drawFastHLine(20, 172, SCREEN_WIDTH - 40, COL_FAINT);
-
-  // WiFi status chip
-  bool connected = (WiFi.status() == WL_CONNECTED);
-  tft.fillRoundRect(40, 188, 240, 40, 8, COL_CARD);
-  tft.setTextColor(connected ? COL_GREEN : COL_RED, COL_CARD);
-  tft.setTextSize(2);
-  tft.drawString(connected ? "WiFi  Connected" : "WiFi  Offline",
-                 SCREEN_WIDTH / 2, 208);
-
-  // TX counter chip
-  String txStr = "TX  #" + String(txCounter);
-  int qDepth = offlineQueueLen();
-  if (qDepth > 0) txStr += "   Q:" + String(qDepth);
-  tft.fillRoundRect(40, 238, 240, 40, 8, COL_CARD);
-  tft.setTextColor(COL_FG, COL_CARD);
-  tft.setTextSize(2);
-  tft.drawString(txStr, SCREEN_WIDTH / 2, 258);
-
-  // Ready label
   tft.setTextColor(COL_MUTED, COL_BG);
-  tft.drawString("Ready for next sale", SCREEN_WIDTH / 2, 330);
+  tft.drawString("PAPERLESS TILL SLIPS", SCREEN_WIDTH / 2, 148);
 
-  // Device ID footer
-  tft.setTextDatum(BC_DATUM);
-  tft.setTextSize(1);
-  tft.setTextColor(COL_FAINT, COL_BG);
-  tft.drawString(TILL_ID, SCREEN_WIDTH / 2, SCREEN_HEIGHT - 6);
-  tft.setTextDatum(MC_DATUM);
+  // Headline
+  tft.setFreeFont(&FreeSansBold18pt7b);
+  tft.setTextColor(COL_FG, COL_BG);
+  tft.drawString("Ready for next sale", SCREEN_WIDTH / 2, 220);
+
+  // READY pill
+  drawPill(SCREEN_WIDTH / 2, 258, "READY", COL_GREEN_LT, COL_GREEN_BD, COL_GREEN_DK, true, COL_GREEN);
+
+  // Body copy
+  tft.setFreeFont(&FreeMono9pt7b);
+  tft.setTextColor(COL_MUTED, COL_BG);
+  tft.drawString("Your slip will appear here \x97", SCREEN_WIDTH / 2, 306);
+  tft.drawString("scan or tap to save it.", SCREEN_WIDTH / 2, 326);
+
+  // Date / time line
+  tft.drawString(getDateLine(), SCREEN_WIDTH / 2, 446);
+
+  drawFooter("TILL-01  v2.2");
 }
 
 void drawQR(const char* text) {
