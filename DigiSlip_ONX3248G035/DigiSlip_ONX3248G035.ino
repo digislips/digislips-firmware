@@ -44,11 +44,17 @@
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <TFT_eSPI.h>
+#include <Fonts/FreeSansBold18pt7b.h>
+#include <Fonts/FreeSansBold24pt7b.h>
+#include <Fonts/FreeMono9pt7b.h>
+#include <Fonts/FreeMono12pt7b.h>
 #include <Adafruit_PN532.h>
 #include <QRCodeGenerator.h>
 #include <ArduinoJson.h>
 #include <Preferences.h>
 #include <time.h>
+#include "wordmark_38.h"
+#include "wordmark_22.h"
 
 // =============================================================================
 //  ── CONFIGURATION — edit these for each device ──────────────────────────────
@@ -115,16 +121,19 @@ HardwareSerial posSerial(1);
 #define SCREEN_HEIGHT 480
 TFT_eSPI tft = TFT_eSPI();
 
-// Colours (RGB565) — DigiSlip brand palette (digislip-app/src/constants/theme.ts)
-#define COL_BG       0xEF3B   // #E8E4DA warm page
+// Colours (RGB565) — DigiSlip brand palette v2.2
+#define COL_BG       0xEF3B   // #E8E4DA warm parchment
 #define COL_CARD     0xFFFF   // #FEFDFB off-white
-#define COL_FG       0x18C2   // #1C1917 dark text
-#define COL_ACCENT   0x12DF   // #1558FF brand blue
-#define COL_SUCCESS  0x064D   // #00C96A brand green
-#define COL_ERROR    0xD924   // #DC2626 red
+#define COL_FG       0x18C2   // #1C1917 near-black
 #define COL_MUTED    0x7B8D   // #78716C grey
-#define COL_FAINT    0xD699   // #D6D3CD faint
-#define COL_ON_GREEN 0x08E2   // #0D1F14 dark text on green buttons
+#define COL_FAINT    0xD699   // #D6D3CD light grey
+#define COL_BLUE     0x12DF   // #1558FF brand blue
+#define COL_GREEN    0x064D   // #00C96A brand green
+#define COL_GREEN_LT 0xEFFE   // #ECFDF5 soft green background
+#define COL_GREEN_BD 0xA79A   // #A7F3D0 green border
+#define COL_GREEN_DK 0x04AD   // #059669 dark green text
+#define COL_RED      0xD924   // #DC2626 red
+#define COL_RED_LT   0xFF9E   // #FEF2F2 soft red background
 
 // Touch — CST826 capacitive controller on internal I2C bus
 #define TOUCH_ADDR   0x15
@@ -339,20 +348,100 @@ bool readTouch(int16_t &x, int16_t &y) {
   return true;
 }
 
-// Shared brand header bar — drawn at top of every screen
-void drawHeader(const char* title) {
-  tft.fillRect(0, 0, SCREEN_WIDTH, 44, COL_ACCENT);
+// =============================================================================
+//  ── DESIGN SYSTEM HELPERS ───────────────────────────────────────────────────
+// =============================================================================
+
+void drawWordmark(int cx, int y, int size) {
+  int dw = (size == 38) ? DIGI_38_W : DIGI_22_W;
+  int dh = (size == 38) ? DIGI_38_H : DIGI_22_H;
+  int sw = (size == 38) ? SLIPS_38_W : SLIPS_22_W;
+  int sh = (size == 38) ? SLIPS_38_H : SLIPS_22_H;
+  const uint8_t* db = (size == 38) ? DIGI_38_BITMAP : DIGI_22_BITMAP;
+  const uint8_t* sb = (size == 38) ? SLIPS_38_BITMAP : SLIPS_22_BITMAP;
+  int xStart = cx - (dw + sw) / 2;
+  tft.drawBitmap(xStart,       y, db, dw, dh, COL_BLUE,  COL_BG);
+  tft.drawBitmap(xStart + dw,  y, sb, sw, sh, COL_GREEN, COL_BG);
+}
+
+void drawPill(int cx, int cy, const char* text,
+              uint16_t bg, uint16_t bd, uint16_t tx,
+              bool dot, uint16_t dotc) {
+  tft.setFreeFont(&FreeMono9pt7b);
+  int tw  = tft.textWidth(text);
+  int pw  = tw + 24 + (dot ? 18 : 0);
+  int ph  = 26;
+  int x0  = cx - pw / 2;
+  int y0  = cy - ph / 2;
+  tft.fillRoundRect(x0, y0, pw, ph, 11, bg);
+  tft.drawRoundRect(x0, y0, pw, ph, 11, bd);
+  if (dot) {
+    tft.fillCircle(x0 + 14, cy, 4, dotc);
+    tft.setTextDatum(ML_DATUM);
+    tft.setTextColor(tx, bg);
+    tft.drawString(text, x0 + 24, cy);
+  } else {
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextColor(tx, bg);
+    tft.drawString(text, cx, cy);
+  }
+}
+
+void drawHeader(const char* pillText,
+                uint16_t pillBg, uint16_t pillBd, uint16_t pillTx,
+                bool dot) {
+  tft.fillRect(0, 0, SCREEN_WIDTH, 44, COL_BG);
+  int y = (44 - max(DIGI_22_H, SLIPS_22_H)) / 2;
+  tft.drawBitmap(18,              y, DIGI_22_BITMAP,  DIGI_22_W,  DIGI_22_H,  COL_BLUE,  COL_BG);
+  tft.drawBitmap(18 + DIGI_22_W,  y, SLIPS_22_BITMAP, SLIPS_22_W, SLIPS_22_H, COL_GREEN, COL_BG);
+  tft.drawFastHLine(0, 44, SCREEN_WIDTH, COL_FAINT);
+  if (pillText) {
+    tft.setFreeFont(&FreeMono9pt7b);
+    int tw = tft.textWidth(pillText);
+    int pw = tw + 24 + (dot ? 18 : 0);
+    int ph = 24;
+    int x0 = SCREEN_WIDTH - 18 - pw;
+    int y0 = (44 - ph) / 2;
+    tft.fillRoundRect(x0, y0, pw, ph, 10, pillBg);
+    tft.drawRoundRect(x0, y0, pw, ph, 10, pillBd);
+    if (dot) {
+      tft.fillCircle(x0 + 12, 22, 4, pillTx);
+      tft.setTextDatum(ML_DATUM);
+      tft.setTextColor(pillTx, pillBg);
+      tft.drawString(pillText, x0 + 22, 22);
+    } else {
+      tft.setTextDatum(MC_DATUM);
+      tft.setTextColor(pillTx, pillBg);
+      tft.drawString(pillText, x0 + pw / 2, 22);
+    }
+  }
+}
+
+void drawFooter(const char* text) {
+  tft.setFreeFont(&FreeMono9pt7b);
+  tft.setTextDatum(BC_DATUM);
+  tft.setTextColor(COL_MUTED, COL_BG);
+  tft.drawString(text, SCREEN_WIDTH / 2, SCREEN_HEIGHT - 6);
   tft.setTextDatum(MC_DATUM);
-  tft.setTextColor(0xFFFF, COL_ACCENT);
-  tft.setTextSize(3);
-  tft.drawString(title, SCREEN_WIDTH / 2, 22);
+}
+
+void displayBoot(int progress) {
+  tft.fillScreen(COL_BG);
+  drawWordmark(SCREEN_WIDTH / 2, 215, 38);
+  tft.fillRect(110, 268, 100, 3, COL_FAINT);
+  if (progress > 0) tft.fillRect(110, 268, progress, 3, COL_BLUE);
+  tft.setFreeFont(&FreeMono9pt7b);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(COL_MUTED, COL_BG);
+  tft.drawString("STARTING UP", SCREEN_WIDTH / 2, 286);
+  drawFooter("v2.2  " TILL_ID "  ESP32-S3");
 }
 
 void displayMessage(const char* line1,
                     const char* line2 = "",
                     const char* line3 = "") {
   tft.fillScreen(COL_BG);
-  drawHeader("DigiSlip");
+  drawHeader(nullptr, 0, 0, 0, false);
   tft.setTextDatum(MC_DATUM);
 
   tft.setTextColor(COL_ACCENT, COL_BG);
@@ -377,7 +466,7 @@ void displayIdle() {
   lastIdleRefresh = millis();
 
   tft.fillScreen(COL_BG);
-  drawHeader("DigiSlip");
+  drawHeader(nullptr, 0, 0, 0, false);
 
   // Large clock
   tft.setTextDatum(MC_DATUM);
@@ -419,7 +508,7 @@ void displayIdle() {
 
 void drawQR(const char* text) {
   tft.fillScreen(COL_BG);
-  drawHeader("DigiSlip");
+  drawHeader(nullptr, 0, 0, 0, false);
 
   QRCode qrcode;
   uint8_t qrcodeData[qrcode_getBufferSize(5)];
@@ -717,15 +806,7 @@ void setup() {
   // ── TFT display ─────────────────────────────────────────────────────────────
   tft.init();
   tft.setRotation(0);  // portrait — 320 wide, 480 tall
-  tft.fillScreen(COL_ACCENT);
-  // Splash on brand-blue background
-  tft.setTextDatum(MC_DATUM);
-  tft.setTextColor(0xFFFF, COL_ACCENT);
-  tft.setTextSize(4);
-  tft.drawString("DigiSlip", SCREEN_WIDTH / 2, 200);
-  tft.setTextSize(2);
-  tft.setTextColor(0xC618, COL_ACCENT);  // dimmed white
-  tft.drawString("v2.1", SCREEN_WIDTH / 2, 255);
+  displayBoot(0);
   Serial.println("[TFT] OK — ST7796 320x480 portrait");
 
   // ── I2C — Grove I2C connector ───────────────────────────────────────────────
