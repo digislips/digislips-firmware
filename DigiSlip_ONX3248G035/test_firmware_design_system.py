@@ -45,10 +45,10 @@ REQUIRED_PALETTE = {
 REMOVED_CONSTANTS = ["COL_ACCENT", "COL_SUCCESS", "COL_ERROR", "COL_ON_GREEN"]
 
 REQUIRED_FREEFONTS = [
-    "FreeSansBold18pt7b.h",
-    "FreeSansBold24pt7b.h",
-    "FreeMono9pt7b.h",
-    "FreeMono12pt7b.h",
+    "GFXFF/FreeSansBold18pt7b.h",
+    "GFXFF/FreeSansBold24pt7b.h",
+    "GFXFF/FreeMono9pt7b.h",
+    "GFXFF/FreeMono12pt7b.h",
 ]
 
 REQUIRED_HELPERS = [
