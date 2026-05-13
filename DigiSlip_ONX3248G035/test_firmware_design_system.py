@@ -289,3 +289,88 @@ def test_waiting_claim_calls_drawFooter():
     body = _waiting_claim_body()
     assert "drawFooter(" in body, \
         "drawFooter() not called in STATE_WAITING_CLAIM loop"
+
+
+# =============================================================================
+#  Issue #5 — Printing screen with spinner animation
+# =============================================================================
+
+def _printing_body():
+    m = re.search(r"void\s+drawPrinting\s*\(\s*\)(.*?)(?=\nvoid\s+\w)", SOURCE, re.DOTALL)
+    assert m, "Could not locate drawPrinting() body"
+    return m.group(1)
+
+def _printing_state_body():
+    m = re.search(r"case\s+STATE_PRINTING\s*:(.*?)(?=case\s+STATE_|\bdefault\b)", SOURCE, re.DOTALL)
+    assert m, "Could not locate STATE_PRINTING body"
+    return m.group(1)
+
+
+# ── Behavior 1: drawPrinting() defined and called from STATE_PRINTING ─────────
+
+def test_drawPrinting_defined_and_called():
+    assert re.search(r"\bvoid\s+drawPrinting\s*\(\s*\)", SOURCE), \
+        "drawPrinting() not defined"
+    body = _printing_state_body()
+    assert "drawPrinting(" in body, \
+        "drawPrinting() not called in STATE_PRINTING"
+
+
+# ── Behavior 2: header drawn with no pill ─────────────────────────────────────
+
+def test_printing_header_no_pill():
+    body = _printing_body()
+    m = re.search(r"drawHeader\s*\(\s*(.*?)\s*,", body)
+    assert m, "drawHeader() not found in drawPrinting()"
+    assert m.group(1).strip() == "nullptr", \
+        "drawPrinting() should call drawHeader(nullptr, …) — no pill"
+
+
+# ── Behavior 3: "Printing slip" headline ──────────────────────────────────────
+
+def test_printing_headline_text():
+    body = _printing_body()
+    assert "Printing slip" in body, \
+        '"Printing slip" headline not found in drawPrinting()'
+
+
+# ── Behavior 4: txCounter in Slip sub-label ───────────────────────────────────
+
+def test_printing_slip_label_uses_txCounter():
+    body = _printing_body()
+    assert "txCounter" in body, \
+        "txCounter not used in Slip sub-label in drawPrinting()"
+
+
+# ── Behavior 5: drawFooter called ────────────────────────────────────────────
+
+def test_printing_draws_footer():
+    body = _printing_body()
+    assert "drawFooter(" in body, \
+        "drawFooter() not called in drawPrinting()"
+
+
+# ── Behavior 6: drawArc used for spinner ring ─────────────────────────────────
+
+def test_printing_spinner_uses_drawArc():
+    body = _printing_body()
+    assert "drawArc(" in body, \
+        "drawArc() not found in drawPrinting() — spinner ring missing"
+
+
+# ── Behavior 7: spinAngle advances every 28 ms in STATE_PRINTING ─────────────
+
+def test_printing_spinner_rate_28ms():
+    body = _printing_state_body()
+    assert "spinAngle" in body, \
+        "spinAngle not found in STATE_PRINTING — spinner not animated"
+    assert "28" in body, \
+        "28 ms frame interval not found in STATE_PRINTING spinner logic"
+
+
+# ── Behavior 8: STATE_PRINTING transitions to STATE_IDLE ─────────────────────
+
+def test_printing_state_returns_to_idle():
+    body = _printing_state_body()
+    assert "STATE_IDLE" in body, \
+        "STATE_PRINTING does not transition to STATE_IDLE"

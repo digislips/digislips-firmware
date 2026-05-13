@@ -569,6 +569,34 @@ void drawQR(const char* text) {
 }
 
 // =============================================================================
+//  ── PRINTING SCREEN ──────────────────────────────────────────────────────────
+// =============================================================================
+
+void drawPrinting() {
+  tft.fillScreen(COL_BG);
+  drawHeader(nullptr, 0, 0, 0, false);
+
+  // Spinner ring — static faint background
+  int cx = SCREEN_WIDTH / 2;
+  int cy = 152;
+  tft.drawArc(cx, cy, 36, 30, 0, 360, COL_FAINT, COL_BG);
+
+  // Headline
+  tft.setFreeFont(&FreeSansBold9pt7b);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(COL_FG, COL_BG);
+  tft.drawString("Printing slip", SCREEN_WIDTH / 2, 220);
+
+  // Slip sub-label
+  tft.setFreeFont(&FreeMono9pt7b);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(COL_MUTED, COL_BG);
+  tft.drawString(("Slip #" + String(txCounter)).c_str(), SCREEN_WIDTH / 2, 248);
+
+  drawFooter(TILL_ID "  v2.2");
+}
+
+// =============================================================================
 //  ── ESC/POS PARSER ───────────────────────────────────────────────────────────
 // =============================================================================
 
@@ -1099,23 +1127,37 @@ void loop() {
 
     // ──────────────────────────────────────────────────────────────────────────
     case STATE_PRINTING: {
-      displayMessage("Printing...", ("TX #" + String(txCounter)).c_str());
-      Serial.println("[PRINT] Forwarding " +
-                     String(printBufferLen) + " bytes to printer");
+      static bool printStarted = false;
+      static int  spinAngle    = 0;
+      static unsigned long lastSpin = 0;
 
-      posSerial.write(printBuffer, printBufferLen);
-      posSerial.flush();
+      if (!printStarted) {
+        printStarted = true;
+        drawPrinting();
+        Serial.println("[PRINT] Forwarding " +
+                       String(printBufferLen) + " bytes to printer");
+        posSerial.write(printBuffer, printBufferLen);
+        posSerial.flush();
+        Serial.println("[PRINT] Done");
+        printBufferLen   = 0;
+        receiptLineCount = 0;
+        slipId           = "";
+        nfcUID           = "";
+        currentState     = STATE_IDLE;
+        lastIdleRefresh  = 0;
+        printStarted     = false;
+        break;
+      }
 
-      Serial.println("[PRINT] Done");
-      displayMessage("Printed", "Have a great day");
-      delay(2000);
-
-      printBufferLen   = 0;
-      receiptLineCount = 0;
-      slipId           = "";
-      nfcUID           = "";
-      currentState     = STATE_IDLE;
-      lastIdleRefresh  = 0;
+      // Spinner animation — advance 10° every 28 ms
+      if (millis() - lastSpin >= 28) {
+        lastSpin = millis();
+        int cx = SCREEN_WIDTH / 2;
+        int cy = 152;
+        tft.drawArc(cx, cy, 36, 30, spinAngle, spinAngle + 90, COL_BLUE, COL_BG);
+        tft.drawArc(cx, cy, 36, 30, (spinAngle + 90) % 360, (spinAngle + 180) % 360, COL_FAINT, COL_BG);
+        spinAngle = (spinAngle + 10) % 360;
+      }
       break;
     }
 
