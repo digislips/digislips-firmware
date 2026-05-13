@@ -444,7 +444,7 @@ void displayMessage(const char* line1,
   drawHeader(nullptr, 0, 0, 0, false);
   tft.setTextDatum(MC_DATUM);
 
-  tft.setTextColor(COL_ACCENT, COL_BG);
+  tft.setTextColor(COL_BLUE, COL_BG);
   tft.setTextSize(3);
   tft.drawString(line1, SCREEN_WIDTH / 2, 195);
 
@@ -470,7 +470,7 @@ void displayIdle() {
 
   // Large clock
   tft.setTextDatum(MC_DATUM);
-  tft.setTextColor(COL_ACCENT, COL_BG);
+  tft.setTextColor(COL_BLUE, COL_BG);
   tft.setTextSize(6);
   tft.drawString(getTimeHHMM(), SCREEN_WIDTH / 2, 135);
 
@@ -480,7 +480,7 @@ void displayIdle() {
   // WiFi status chip
   bool connected = (WiFi.status() == WL_CONNECTED);
   tft.fillRoundRect(40, 188, 240, 40, 8, COL_CARD);
-  tft.setTextColor(connected ? COL_SUCCESS : COL_ERROR, COL_CARD);
+  tft.setTextColor(connected ? COL_GREEN : COL_RED, COL_CARD);
   tft.setTextSize(2);
   tft.drawString(connected ? "WiFi  Connected" : "WiFi  Offline",
                  SCREEN_WIDTH / 2, 208);
@@ -542,8 +542,8 @@ void drawQR(const char* text) {
   tft.drawString("Scan or tap to claim", SCREEN_WIDTH / 2, cardY + cardH + 16);
 
   // Print button (filled green)
-  tft.fillRoundRect(BTN_PRINT_X, BTN_PRINT_Y, BTN_PRINT_W, BTN_PRINT_H, 10, COL_SUCCESS);
-  tft.setTextColor(COL_ON_GREEN, COL_SUCCESS);
+  tft.fillRoundRect(BTN_PRINT_X, BTN_PRINT_Y, BTN_PRINT_W, BTN_PRINT_H, 10, COL_GREEN);
+  tft.setTextColor(0xFFFF, COL_GREEN);
   tft.setTextSize(2);
   tft.drawString("Print Slip", SCREEN_WIDTH / 2, BTN_PRINT_Y + BTN_PRINT_H / 2);
 
