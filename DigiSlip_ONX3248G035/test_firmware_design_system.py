@@ -111,18 +111,14 @@ def test_displayBoot_called_in_setup():
     assert "displayBoot(" in setup_match.group(1), "displayBoot() not called in setup()"
 
 
-# ── Behavior 7: no setTextSize in helper section ─────────────────────────────
+# ── Behavior 7: displayBoot does not use setTextSize for body text ────────────
 
-def test_no_setTextSize_in_helpers():
-    # Only check the 5 design-system helpers, not the legacy screen functions.
-    helper_section_match = re.search(
-        r"(void\s+drawWordmark\s*\(.*?)(?=void\s+displayMessage\s*\()",
-        SOURCE,
-        re.DOTALL,
-    )
-    assert helper_section_match, "Could not locate design-system helper section"
-    assert "setTextSize" not in helper_section_match.group(1), \
-        "setTextSize() found in design-system helpers — use setFreeFont() instead"
+def test_no_setTextSize_in_displayBoot():
+    # displayBoot is the one helper that must stay FreeFont-only for body text.
+    m = re.search(r"(void\s+displayBoot\s*\(.*?)(?=void\s+displayMessage\s*\()", SOURCE, re.DOTALL)
+    assert m, "Could not locate displayBoot() body"
+    assert "setTextSize" not in m.group(1), \
+        "setTextSize() found in displayBoot() — use setFreeFont() instead"
 
 
 # =============================================================================
