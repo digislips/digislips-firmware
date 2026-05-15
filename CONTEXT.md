@@ -8,7 +8,7 @@ Arduino/ESP32 firmware for the DigiSlip hardware device. The device sits inline 
 
 **One firmware file:** `DigiSlip_ONX3248G035/DigiSlip_ONX3248G035.ino`
 
-**Firmware version:** v2.2 (design system complete — all 9 screens implemented, May 2026)
+**Firmware version:** v2.2.1 (noise filtering added, May 2026)
 
 ---
 
@@ -38,7 +38,9 @@ STATE_IDLE
   → (UART1 data arrives) → STATE_BUFFERING
 
 STATE_BUFFERING
-  → (500ms silence after last byte) → STATE_UPLOADING
+  → (500ms silence, < 16 bytes) → STATE_IDLE  [noise discard]
+  → (500ms silence, 0 text lines parsed) → STATE_IDLE  [noise discard]
+  → (500ms silence, ≥ 16 bytes, ≥ 1 text line) → STATE_UPLOADING
 
 STATE_UPLOADING
   → (POST succeeds) → STATE_WAITING_CLAIM  [draws QR screen]
@@ -77,6 +79,15 @@ STATE_OFFLINE
 - **`Wire.setClock(400000)` required** — 100kHz is unreliable
 - I2C bus recovery (9 SCL pulses + manual STOP) must run before `Wire.begin()`
 - Debounce: 300ms minimum
+
+### UART Noise Filtering
+
+Two guards in `STATE_BUFFERING` prevent serial noise from triggering a slip upload:
+
+1. **Minimum byte count (`MIN_SLIP_BYTES = 16`):** If the burst is fewer than 16 bytes after the 500ms silence gap, it is discarded and the device returns to `STATE_IDLE`. A real ESC/POS slip is always many times longer.
+2. **Zero text lines:** After `parseESCPOS()`, if `receiptLineCount == 0` (no printable ASCII was extracted), the buffer is discarded and the device returns to `STATE_IDLE`.
+
+Neither guard increments `txCounter`. Log messages: `[UART] Too short — discarding (noise)` and `[Parser] No text extracted — discarding (noise)`.
 
 ### Print/Cancel Separation
 

@@ -84,6 +84,9 @@ const char* WIFI_PASSWORD  = "0836468891";
 #define WIFI_WATCHDOG_MS    10000   // check WiFi health every 10 s
 #define SERIAL_SILENCE_MS     500   // gap that signals end of ESC/POS burst
 
+// Minimum bytes to treat a UART burst as a real ESC/POS slip (filters line noise)
+#define MIN_SLIP_BYTES         16
+
 // Offline queue
 #define OFFLINE_QUEUE_SIZE      5   // max queued transactions when WiFi is down
 
@@ -1167,7 +1170,21 @@ void loop() {
         Serial.println("[UART] " + String(printBufferLen) +
                        " bytes received — parsing");
 
+        if (printBufferLen < MIN_SLIP_BYTES) {
+          Serial.println("[UART] Too short — discarding (noise)");
+          printBufferLen = 0;
+          currentState   = STATE_IDLE;
+          break;
+        }
+
         parseESCPOS(printBuffer, printBufferLen);
+
+        if (receiptLineCount == 0) {
+          Serial.println("[Parser] No text extracted — discarding (noise)");
+          printBufferLen = 0;
+          currentState   = STATE_IDLE;
+          break;
+        }
 
         txCounter++;
         saveTxCounter(txCounter);
