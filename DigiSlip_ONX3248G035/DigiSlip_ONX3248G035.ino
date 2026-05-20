@@ -92,7 +92,7 @@ const char* WIFI_PASSWORD = "0836468891";
 #define OFFLINE_QUEUE_SIZE 5  // max queued transactions when WiFi is down
 
 // Firmware version — must match the GitHub release tag exactly (e.g. "v2.3.0")
-#define FIRMWARE_VERSION "v2.3.0"
+#define FIRMWARE_VERSION "v2.3.1"
 
 // =============================================================================
 //  ── PIN DEFINITIONS — ONX3248G035 ───────────────────────────────────────────
@@ -483,7 +483,7 @@ void displayBoot(int progress) {
   tft.setTextDatum(MC_DATUM);
   tft.setTextColor(COL_MUTED, COL_BG);
   tft.drawString("STARTING UP", SCREEN_WIDTH / 2, 286);
-  drawFooter(TILL_ID "  v2.2");
+  drawFooter(TILL_ID "  " FIRMWARE_VERSION);
 }
 
 void bootProgress(int pct, const char* status) {
@@ -559,7 +559,7 @@ void displayIdle() {
   tft.setTextDatum(MC_DATUM);
   tft.drawString(getDateLine(), SCREEN_WIDTH / 2, 446);
 
-  drawFooter("TILL-01  v2.2");
+  drawFooter(TILL_ID "  " FIRMWARE_VERSION);
 }
 
 void drawQR(const char* text) {
@@ -641,7 +641,7 @@ void drawPrinting() {
   tft.setTextColor(COL_MUTED, COL_BG);
   tft.drawString(("Slip #" + String(txCounter)).c_str(), SCREEN_WIDTH / 2, 248);
 
-  drawFooter(TILL_ID "  v2.2");
+  drawFooter(TILL_ID "  " FIRMWARE_VERSION);
 }
 
 // =============================================================================
