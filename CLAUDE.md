@@ -2,7 +2,7 @@
 
 ### Issue tracker
 
-Issues live in GitHub Issues (`JoeBurd-code/digislip-firmware`). See `docs/agents/issue-tracker.md`.
+Issues live in GitHub Issues (`digislips/digislips-firmware`). See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
