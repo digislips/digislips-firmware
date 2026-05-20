@@ -8,7 +8,15 @@ Arduino/ESP32 firmware for the DigiSlip hardware device. The device sits inline 
 
 **One firmware file:** `DigiSlip_ONX3248G035/DigiSlip_ONX3248G035.ino`
 
-**Firmware version:** v2.2.1 (noise filtering added, May 2026)
+**Firmware version:** v2.3.0 (OTA update support added, May 2026)
+
+**OTA release checklist** — must follow this order every release or devices will boot-loop:
+1. Make code changes
+2. Bump `#define FIRMWARE_VERSION` in the `.ino` to match the new tag (e.g. `"v2.4.0"`)
+3. Sketch → Export Compiled Binary → produces `DigiSlip_ONX3248G035.ino.bin`
+4. Rename to `DigiSlip_ONX3248G035.bin`
+5. Publish GitHub release tagged `v2.4.0` with the `.bin` attached
+6. Devices update on next power cycle
 
 ---
 

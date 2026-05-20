@@ -92,7 +92,7 @@ const char* WIFI_PASSWORD = "0836468891";
 #define OFFLINE_QUEUE_SIZE 5  // max queued transactions when WiFi is down
 
 // Firmware version — must match the GitHub release tag exactly (e.g. "v2.3.0")
-#define FIRMWARE_VERSION "v2.2.1"
+#define FIRMWARE_VERSION "v2.3.0"
 
 // =============================================================================
 //  ── PIN DEFINITIONS — ONX3248G035 ───────────────────────────────────────────
