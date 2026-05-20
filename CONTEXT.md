@@ -8,7 +8,7 @@ Arduino/ESP32 firmware for the DigiSlip hardware device. The device sits inline 
 
 **One firmware file:** `DigiSlip_ONX3248G035/DigiSlip_ONX3248G035.ino`
 
-**Firmware version:** v2.3.0 (OTA update support added, May 2026)
+**Firmware version:** v2.3.1 (OTA update support added, May 2026)
 
 **OTA release checklist** — must follow this order every release or devices will boot-loop:
 1. Make code changes
@@ -120,6 +120,15 @@ FreeFonts render much larger than desktop pt sizes suggest at 165 DPI. Confirmed
 - `FreeSans9pt7b` for pill labels renders ~20px tall — too large for pill chrome; use bitmap `setTextSize(2)` instead
 - **Datum reset rule:** `drawPill(dot=true)` and `drawHeader(dot=true)` leave `ML_DATUM` set. Always call `tft.setTextDatum(MC_DATUM)` explicitly after these helpers
 
+### Arduino IDE Partition Scheme
+
+The ONX3248G035 has **16MB flash** (not 4MB). Arduino IDE must be configured correctly:
+
+- **Flash Size:** `16MB (128Mb)` — changing this first unlocks the correct partition options
+- **Partition Scheme:** `16M Flash (3MB APP/9.9MB FATFS)` — required for OTA (dual-partition needs ~3MB per app slot)
+- At 3MB APP budget, the sketch compiles to ~36% usage (leaving headroom for future growth)
+- The default 4MB partition scheme produces `88% usage` and OTA will fail (no space for second slot)
+
 ### TFT_eSPI FreeFonts
 
 Do **not** add `#include <Fonts/GFXFF/FreeSansBold9pt7b.h>` (or any FreeFonts header) to the sketch. `TFT_eSPI.h` pulls in `gfxfont.h` unconditionally which includes every GFXFF font. Double-include causes "redefinition of const uint8_t …Bitmaps" compile errors.
@@ -175,9 +184,10 @@ Do **not** add `#include <Fonts/GFXFF/FreeSansBold9pt7b.h>` (or any FreeFonts he
 `setup()` keeps the boot screen visible throughout startup:
 1. `displayBoot(0)` — full draw
 2. WiFi connect loop (0→45%) with "CONNECTING..." status
-3. NTP sync loop (45→90%) with "SYNCING TIME..." status
-4. `bootProgress(100, "READY")`, hold for ≥4s total
-5. Transition to `STATE_IDLE`
+3. `bootProgress(45, "CHECKING UPDATE...")` → `checkOTA()` runs (GitHub Releases API, downloads + flashes if newer tag found, reboots)
+4. NTP sync loop (48→90%) with "SYNCING TIME..." status
+5. `bootProgress(100, "READY")`, hold for ≥4s total
+6. Transition to `STATE_IDLE`
 
 The "Connecting to WiFi", "WiFi OK / IP / Time synced", "Receiving...", "Loading..." screens from v2.1 are **removed**. The boot screen is the only startup screen.
 
@@ -189,6 +199,7 @@ The "Connecting to WiFi", "WiFi OK / IP / Time synced", "Receiving...", "Loading
 |--------|---------|
 | **Supabase** | `https://eivctqjisodfhaitzyiq.supabase.co` — REST API for slip insert/poll, edge functions for NFC claim |
 | **Web claim page** | `https://digislips.co.za/slip/<uuid>` — Vercel-hosted static HTML, reads Supabase |
+| **Firmware repo** | `digislips/digislips-firmware` (GitHub digislips org) — this repo, public |
 | **Backend repo** | `digislip-backend` (GitHub JoeBurd-code) — edge function source |
 | **App repo** | `digislip-app` — React Native (Expo) mobile app |
 
@@ -196,8 +207,11 @@ The "Connecting to WiFi", "WiFi OK / IP / Time synced", "Receiving...", "Loading
 
 ## TDD Test Suite
 
-`DigiSlip_ONX3248G035/test_firmware_design_system.py` — 57 source-level pytest tests.
+**74 source-level pytest tests across 2 files.** No hardware needed — tests parse the `.ino` source directly.
 
-No hardware needed. Tests parse the `.ino` source and verify structural requirements: palette constants + RGB565 values, helper function definitions, screen layout choices, state machine wiring, and timing.
+| File | Tests | Covers |
+|------|-------|--------|
+| `test_firmware_design_system.py` | 57 | Palette constants + RGB565 values, helper function definitions, screen layout choices, state machine wiring, timing |
+| `test_ota.py` | 17 | `checkOTA()` (GitHub API, version compare, Serial logs), `applyOTA()` (HTTPUpdate, progress, redirects) |
 
-Run: `cd DigiSlip_ONX3248G035 && python -m pytest test_firmware_design_system.py -v`
+Run all: `cd DigiSlip_ONX3248G035 && python -m pytest -v`
