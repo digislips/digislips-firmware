@@ -3,3 +3,7 @@ build/
 .vscode/
 *.bin
 .claude/
+__pycache__/
+*.pyc
+*.pyo
+*.ttf
