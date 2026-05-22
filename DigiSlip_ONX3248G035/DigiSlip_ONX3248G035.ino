@@ -52,32 +52,7 @@
 #include <time.h>
 #include "wordmark_38.h"
 #include "wordmark_22.h"
-
-// =============================================================================
-//  ── CONFIGURATION — edit these for each device ──────────────────────────────
-// =============================================================================
-
-const char* WIFI_SSID = "SOMO";
-const char* WIFI_PASSWORD = "0836468891";
-
-// Each physical device gets its own ID — change per unit deployed
-#define TILL_ID "TILL-01"
-
-// Supabase
-#define SUPABASE_URL "https://eivctqjisodfhaitzyiq.supabase.co"
-#define SUPABASE_ANON "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVpdmN0cWppc29kZmhhaXR6eWlxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY4MDgxMjIsImV4cCI6MjA5MjM4NDEyMn0._0wu91Zrc3aMrKsO_KUkp64CoOCklwMViYAofYZyCFI"
-
-// Each physical device gets its own token — generated via provision_device() in Supabase
-#define DEVICE_TOKEN "92007b7839f6909c07965ac26bd080a673a5ae16b637b237ab63945af0e66431"
-#define DEVICE_ID "c42353a3-f383-49ac-aef4-06d054056ae8"
-#define MERCHANT_ID "a95ec67b-4c7e-4211-922e-79dd08a9977d"
-
-// QR code base URL — phone app will open  https://digislips.co.za/slip/<slip_uuid>
-#define QR_BASE_URL "https://digislips.co.za/slip/"
-
-// NTP
-#define NTP_SERVER "pool.ntp.org"
-#define TZ_OFFSET 7200  // UTC+2 (SAST) in seconds
+#include "config.h"  // per-device credentials — copy config.h.example → config.h and fill in
 
 // Timeouts
 #define CLAIM_TIMEOUT_MS 60000  // 60 s before reverting to IDLE
