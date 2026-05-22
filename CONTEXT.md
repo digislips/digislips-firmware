@@ -8,6 +8,8 @@ Arduino/ESP32 firmware for the DigiSlip hardware device. The device sits inline 
 
 **One firmware file:** `DigiSlip_ONX3248G035/DigiSlip_ONX3248G035.ino`
 
+**Per-device credentials:** `DigiSlip_ONX3248G035/config.h` (gitignored — never committed). Copy `config.h.example` → `config.h` and fill in WiFi, Supabase, and device values before flashing.
+
 **Firmware version:** v2.3.1 (OTA update support added, May 2026)
 
 **OTA release checklist** — must follow this order every release or devices will boot-loop:
@@ -29,8 +31,8 @@ Arduino/ESP32 firmware for the DigiSlip hardware device. The device sits inline 
 | **claim window** | The 60-second period after a slip is uploaded where the device shows the QR screen. After 60s the device returns to IDLE silently |
 | **digital slip** | The slip record in Supabase — independent of whether a physical paper copy printed |
 | **print** | Forwarding the buffered raw ESC/POS bytes to the thermal printer via UART1 |
-| **TILL-ID** | Per-device identifier hardcoded in firmware (e.g. `TILL-01`); corresponds to a device record in Supabase |
-| **device token** | 64-char hex secret hardcoded per device; validates device identity in Supabase edge functions |
+| **TILL-ID** | Per-device identifier defined in `config.h` (e.g. `TILL-01`); corresponds to a device record in Supabase |
+| **device token** | 64-char hex secret defined in `config.h` per device; validates device identity in Supabase edge functions |
 | **NFC claim** | PN532 reads card UID → firmware calls `nfc-claim` edge function → resolves UID to user account → `STATE_CLAIMED` |
 | **ESC/POS** | Epson receipt printer command language. The raw byte stream from the POS. The firmware strips control sequences, preserves printable ASCII and line breaks |
 | **offline queue** | NVS-backed FIFO (up to 5 transactions) used when WiFi is down. Flushed to Supabase when reconnected |
@@ -207,11 +209,11 @@ The "Connecting to WiFi", "WiFi OK / IP / Time synced", "Receiving...", "Loading
 
 ## TDD Test Suite
 
-**74 source-level pytest tests across 2 files.** No hardware needed — tests parse the `.ino` source directly.
+**88 source-level pytest tests across 2 files.** No hardware needed — tests parse the `.ino` source directly.
 
 | File | Tests | Covers |
 |------|-------|--------|
-| `test_firmware_design_system.py` | 57 | Palette constants + RGB565 values, helper function definitions, screen layout choices, state machine wiring, timing |
+| `test_firmware_design_system.py` | 62 | Palette constants + RGB565 values, helper function definitions, screen layout choices, state machine wiring, timing, config.h structure |
 | `test_ota.py` | 17 | `checkOTA()` (GitHub API, version compare, Serial logs), `applyOTA()` (HTTPUpdate, progress, redirects) |
 
 Run all: `cd DigiSlip_ONX3248G035 && python -m pytest -v`
