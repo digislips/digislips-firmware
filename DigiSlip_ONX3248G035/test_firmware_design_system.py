@@ -659,3 +659,76 @@ def test_claimed_state_holds_9s_then_idle():
         "9000 ms hold not found in STATE_CLAIMED"
     assert "STATE_IDLE" in body, \
         "STATE_CLAIMED does not transition to STATE_IDLE"
+
+
+# =============================================================================
+#  Issue #2 — config.h credential refactor
+# =============================================================================
+
+REPO_ROOT = Path(__file__).parent.parent
+GITIGNORE = REPO_ROOT / ".gitignore"
+EXAMPLE = Path(__file__).parent / "config.h.example"
+
+REQUIRED_CONFIG_KEYS = [
+    "WIFI_SSID",
+    "WIFI_PASSWORD",
+    "TILL_ID",
+    "SUPABASE_URL",
+    "SUPABASE_ANON",
+    "DEVICE_TOKEN",
+    "DEVICE_ID",
+    "MERCHANT_ID",
+    "QR_BASE_URL",
+    "NTP_SERVER",
+    "TZ_OFFSET",
+]
+
+# ── Behavior 1: sketch includes config.h ─────────────────────────────────────
+
+def test_sketch_includes_config_h():
+    assert '#include "config.h"' in SOURCE, \
+        'Sketch does not contain #include "config.h"'
+
+
+# ── Behavior 2: config.h is gitignored ───────────────────────────────────────
+
+def test_config_h_in_gitignore():
+    text = GITIGNORE.read_text(encoding="utf-8")
+    lines = [l.strip() for l in text.splitlines()]
+    assert "config.h" in lines, \
+        "config.h not found in .gitignore"
+
+
+# ── Behavior 3: config.h.example exists ──────────────────────────────────────
+
+def test_config_h_example_exists():
+    assert EXAMPLE.exists(), \
+        "config.h.example not found in sketch directory"
+
+
+# ── Behavior 4: config.h.example defines all required keys ───────────────────
+
+def test_config_h_example_defines_all_required_keys():
+    text = EXAMPLE.read_text(encoding="utf-8")
+    for key in REQUIRED_CONFIG_KEYS:
+        assert re.search(rf"#define\s+{key}\b", text), \
+            f"config.h.example missing required key: {key}"
+
+
+# ── Behavior 5: no credential values remain in the sketch ────────────────────
+
+def test_no_credentials_in_sketch():
+    # Supabase anon key is a JWT — three base64 segments separated by dots
+    jwt_pattern = r"eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}"
+    assert not re.search(jwt_pattern, SOURCE), \
+        "JWT-shaped string (Supabase anon key) found in sketch source"
+
+    # Device token is a 64-char lowercase hex string
+    hex_token_pattern = r'["\']([0-9a-f]{64})["\']'
+    assert not re.search(hex_token_pattern, SOURCE), \
+        "64-char hex device token found in sketch source"
+
+    # WiFi password must not be assigned inline
+    wifi_inline_pattern = r'WIFI_PASSWORD\s*=\s*"[^"]+'
+    assert not re.search(wifi_inline_pattern, SOURCE), \
+        "WIFI_PASSWORD assigned inline in sketch source"
