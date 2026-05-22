@@ -202,8 +202,8 @@ The "Connecting to WiFi", "WiFi OK / IP / Time synced", "Receiving...", "Loading
 | **Supabase** | `https://eivctqjisodfhaitzyiq.supabase.co` — REST API for slip insert/poll, edge functions for NFC claim |
 | **Web claim page** | `https://digislips.co.za/slip/<uuid>` — Vercel-hosted static HTML, reads Supabase |
 | **Firmware repo** | `digislips/digislips-firmware` (GitHub digislips org) — this repo, public |
-| **Backend repo** | `digislip-backend` (GitHub JoeBurd-code) — edge function source |
-| **App repo** | `digislip-app` — React Native (Expo) mobile app |
+| **Backend repo** | `digislips/digislip-backend` (GitHub digislips org) — edge function source |
+| **App repo** | `digislips/digislip-app` (GitHub digislips org) — React Native (Expo) mobile app |
 
 ---
 
