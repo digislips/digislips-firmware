@@ -835,10 +835,53 @@ void parseESCPOS(uint8_t* buf, int len) {
 }
 
 // =============================================================================
+//  ── UUID GENERATION (RFC 4122 version 4, hardware RNG) ──────────────────────
+// =============================================================================
+
+String generateUUID() {
+  uint8_t uuid[16];
+  uint32_t r0 = esp_random();
+  uint32_t r1 = esp_random();
+  uint32_t r2 = esp_random();
+  uint32_t r3 = esp_random();
+  uuid[0]  = (r0 >>  0) & 0xFF;
+  uuid[1]  = (r0 >>  8) & 0xFF;
+  uuid[2]  = (r0 >> 16) & 0xFF;
+  uuid[3]  = (r0 >> 24) & 0xFF;
+  uuid[4]  = (r1 >>  0) & 0xFF;
+  uuid[5]  = (r1 >>  8) & 0xFF;
+  uuid[6]  = (r1 >> 16) & 0xFF;
+  uuid[7]  = (r1 >> 24) & 0xFF;
+  uuid[8]  = (r2 >>  0) & 0xFF;
+  uuid[9]  = (r2 >>  8) & 0xFF;
+  uuid[10] = (r2 >> 16) & 0xFF;
+  uuid[11] = (r2 >> 24) & 0xFF;
+  uuid[12] = (r3 >>  0) & 0xFF;
+  uuid[13] = (r3 >>  8) & 0xFF;
+  uuid[14] = (r3 >> 16) & 0xFF;
+  uuid[15] = (r3 >> 24) & 0xFF;
+
+  // Set version 4 bits
+  uuid[6] = (uuid[6] & 0x0F) | 0x40;
+  // Set RFC 4122 variant bits
+  uuid[8] = (uuid[8] & 0x3F) | 0x80;
+
+  char buf[37];
+  snprintf(buf, sizeof(buf),
+    "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+    uuid[0],  uuid[1],  uuid[2],  uuid[3],
+    uuid[4],  uuid[5],
+    uuid[6],  uuid[7],
+    uuid[8],  uuid[9],
+    uuid[10], uuid[11], uuid[12], uuid[13], uuid[14], uuid[15]);
+  return String(buf);
+}
+
+// =============================================================================
 //  ── SUPABASE — build JSON payload ────────────────────────────────────────────
 // =============================================================================
 
-String buildSupabaseJSON(const String& timestamp) {
+String buildSupabaseJSON(const String& timestamp, const String& uuid) {
   String rawText = "";
   for (int i = 0; i < receiptLineCount; i++) {
     rawText += receiptLines[i];
@@ -848,6 +891,7 @@ String buildSupabaseJSON(const String& timestamp) {
   rawText.replace("\"", "\\\"");
 
   DynamicJsonDocument doc(4096);
+  doc["id"] = uuid;
   doc["device_id"] = DEVICE_ID;
   doc["merchant_id"] = MERCHANT_ID;
   doc["raw_text"] = rawText;
@@ -879,18 +923,17 @@ String supabasePost(const String& json) {
   https.addHeader("Content-Type", "application/json");
   https.addHeader("apikey", SUPABASE_ANON);
   https.addHeader("Authorization", "Bearer " + String(SUPABASE_ANON));
-  https.addHeader("Prefer", "return=representation");
+  https.addHeader("Prefer", "return=minimal");
 
   int code = https.POST(json);
 
   String newSlipId = "";
   if (code >= 200 && code < 300) {
-    String body = https.getString();
-    DynamicJsonDocument doc(1024);
-    if (deserializeJson(doc, body) == DeserializationError::Ok) {
-      newSlipId = doc[0]["id"].as<String>();
+    DynamicJsonDocument doc(512);
+    if (deserializeJson(doc, json) == DeserializationError::Ok) {
+      newSlipId = doc["id"].as<String>();
     }
-    Serial.println("[Supabase] POST OK → " + body);
+    Serial.println("[Supabase] POST OK → " + newSlipId);
   } else {
     Serial.println("[Supabase] POST failed: " + String(code) + " " + https.getString());
   }
@@ -944,12 +987,9 @@ bool supabaseIsClaimed(const String& id) {
   client.setInsecure();
 
   HTTPClient https;
-  String url = String(SUPABASE_URL) + "/rest/v1/slips?id=eq." + id + "&select=claimed";
+  String url = String(SUPABASE_URL) + "/functions/v1/get-slip?id=" + id;
 
   if (!https.begin(client, url)) return false;
-
-  https.addHeader("apikey", SUPABASE_ANON);
-  https.addHeader("Authorization", "Bearer " + String(SUPABASE_ANON));
 
   int code = https.GET();
   bool claimed = false;
@@ -958,7 +998,7 @@ bool supabaseIsClaimed(const String& id) {
     String body = https.getString();
     DynamicJsonDocument doc(256);
     if (deserializeJson(doc, body) == DeserializationError::Ok) {
-      claimed = doc[0]["claimed"].as<bool>();
+      claimed = doc["claimed"].as<bool>();
     }
     Serial.println("[Poll] claimed=" + String(claimed));
   }
@@ -1295,7 +1335,8 @@ void loop() {
     case STATE_UPLOADING:
       {
         String timestamp = getTimestamp();
-        String json = buildSupabaseJSON(timestamp);
+        String uuid = generateUUID();
+        String json = buildSupabaseJSON(timestamp, uuid);
 
         Serial.println("[Supabase] Posting slip TX#" + String(txCounter));
 
