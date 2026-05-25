@@ -20,6 +20,14 @@ Arduino/ESP32 firmware for the DigiSlip hardware device. The device sits inline 
 5. Publish GitHub release tagged `v2.4.0` with the `.bin` attached
 6. Devices update on next power cycle
 
+**Pre-release security checklist** — do this once before the first production release:
+- [ ] Rotate WiFi password — update `WIFI_PASSWORD` in `config.h` on all devices
+- [ ] Rotate Supabase anon key — regenerate in Supabase dashboard → update `SUPABASE_ANON` in `config.h` and any web/app clients
+- [ ] Rotate device token — generate new 64-char hex secret per device → update `DEVICE_TOKEN` in `config.h` and the corresponding Supabase device record
+- [ ] Enable 2FA on GitHub, Supabase, and Cloudflare accounts
+- [ ] Add rate limiting to the `get-slip` Edge Function
+- [ ] Remove legacy `slip` Edge Function (tracked: digislips/digislip-web#6)
+
 ---
 
 ## Glossary
