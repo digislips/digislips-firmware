@@ -195,6 +195,46 @@ The "Connecting to WiFi", "WiFi OK / IP / Time synced", "Receiving...", "Loading
 
 ---
 
+## Supabase Integration
+
+### Slip upload — `supabasePost()`
+
+The device generates a UUID v4 **before** calling `buildSupabaseJSON()`:
+
+```cpp
+String uuid = generateUUID();          // hardware RNG — esp_random() × 4
+String json = buildSupabaseJSON(timestamp, uuid);  // embeds "id": uuid
+slipId = supabasePost(json);           // returns uuid on 201, "" on failure
+```
+
+`generateUUID()` uses `esp_random()` (ESP32 hardware RNG) for all 128 bits, then sets the RFC 4122 version 4 bits (`uuid[6] |= 0x40`) and variant bits (`uuid[8] |= 0x80`), formatted into `char buf[37]` (36 chars + null).
+
+`supabasePost()` sends `Prefer: return=minimal`. On HTTP 201 it returns the pre-generated UUID from the input JSON (not from the response body — `return=minimal` produces an empty body). On any other code, returns `""`.
+
+**Why `return=minimal`:** `return=representation` causes PostgREST to SELECT the inserted row and return it. With the `anon_select_slips` RLS policy absent (deleted in the May 2026 security audit), that SELECT returns HTTP 401 (`42501 new row violates row-level security`). `return=minimal` skips the post-insert SELECT entirely — 201 with empty body. `return=headers-only` also triggers a SELECT and returns 401.
+
+### Claim polling — `supabaseIsClaimed()`
+
+Polls the `get-slip` Edge Function, not the Data API directly:
+
+```
+GET /functions/v1/get-slip?id=<uuid>
+```
+
+No `apikey` or `Authorization` headers — the Edge Function has `verify_jwt = false`. Returns a plain JSON object `{"raw_text":"...","created_at":"...","claimed":true/false}`. The firmware parses `doc["claimed"].as<bool>()` (not `doc[0]["claimed"]` — there is no array wrapper).
+
+**Why Edge Function:** The `anon_select_slips` RLS policy was deleted in the same security audit. The direct Data API poll (`GET /rest/v1/slips?id=eq.<uuid>&select=claimed`) returned an empty array with no error, so `claimed` was never `true` and the device always timed out. The `get-slip` Edge Function runs server-side with the service role and is unaffected by the anon RLS change.
+
+### Offline queue and UUID
+
+The offline queue stores the full JSON string (including `"id"`) in NVS. When `flushOfflineQueue()` replays a queued slip via `supabasePost(json)`, the same UUID from the original attempt is used — no new UUID is generated. This preserves the slip URL (which the customer may have already been shown via QR or NFC).
+
+### `get-slip` Edge Function
+
+Deployed at `https://eivctqjisodfhaitzyiq.supabase.co/functions/v1/get-slip`. Source in `digislips/digislip-backend`. CORS locked to `digislips.co.za`. `verify_jwt = false`. Returns a single JSON object or HTTP 404 if the slip is not found.
+
+---
+
 ## External Dependencies
 
 | System | Details |
@@ -209,11 +249,13 @@ The "Connecting to WiFi", "WiFi OK / IP / Time synced", "Receiving...", "Loading
 
 ## TDD Test Suite
 
-**88 source-level pytest tests across 2 files.** No hardware needed — tests parse the `.ino` source directly.
+**106 source-level pytest tests across 4 files.** No hardware needed — tests parse the `.ino` source directly.
 
 | File | Tests | Covers |
 |------|-------|--------|
 | `test_firmware_design_system.py` | 62 | Palette constants + RGB565 values, helper function definitions, screen layout choices, state machine wiring, timing, config.h structure |
 | `test_ota.py` | 17 | `checkOTA()` (GitHub API, version compare, Serial logs), `applyOTA()` (HTTPUpdate, progress, redirects) |
+| `test_supabase_post.py` | 11 | `generateUUID()` (esp_random entropy, v4/variant bits, buf[37]), `buildSupabaseJSON()` (uuid param, doc["id"]), `supabasePost()` (return=minimal, no return=representation, reads id from input json), `STATE_UPLOADING` call order |
+| `test_supabase_is_claimed.py` | 7 | `supabaseIsClaimed()` uses `/functions/v1/get-slip`, no apikey/Authorization headers, parses `doc["claimed"]` not `doc[0]`, retains `[Poll] claimed=` log |
 
 Run all: `cd DigiSlip_ONX3248G035 && python -m pytest -v`
