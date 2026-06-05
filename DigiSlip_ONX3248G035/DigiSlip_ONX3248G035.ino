@@ -21,7 +21,6 @@
 //    RS232 from POS   → MAX3232 → UART1 Grove connector → IO12 (RX)
 //    RS232 to Printer → MAX3232 → UART1 Grove connector → IO13 (TX)
 //    NFC (PN532 I2C)  → I2C Grove connector → IO8 (SDA), IO7 (SCL)
-//    Button           → IO38 (24-pin header), other leg to GND
 //
 //  TFT_eSPI User_Setup.h must define:
 //    #define ST7796_DRIVER
@@ -81,9 +80,6 @@
 #define I2C_SDA 8
 #define I2C_SCL 7
 
-// Button — 24-pin GPIO header, no strapping conflicts on S3
-#define BUTTON_PIN 38  // other leg to GND; INPUT_PULLUP used
-
 // Backlight — controlled by board, set HIGH to enable
 #define TFT_BL_PIN 6
 
@@ -139,7 +135,7 @@ enum SystemState {
   STATE_IDLE,           // show clock / status; waiting for POS data
   STATE_BUFFERING,      // receiving ESC/POS bytes
   STATE_UPLOADING,      // POST to Supabase
-  STATE_WAITING_CLAIM,  // show QR, poll Supabase, listen for NFC / button
+  STATE_WAITING_CLAIM,  // show QR, poll Supabase, listen for NFC / touch
   STATE_CLAIMED,        // digital claim confirmed — no print
   STATE_CANCELLED,      // 1-second confirmation after cashier cancels
   STATE_PRINTING,       // forwarding buffer to printer
@@ -1202,9 +1198,6 @@ void setup() {
   posSerial.setRxBufferSize(4096);
   Serial.println("[UART1] RX=IO12 TX=IO13 @ 9600");
 
-  // ── Button — 24-pin header IO38 ─────────────────────────────────────────────
-  pinMode(BUTTON_PIN, INPUT_PULLUP);
-
   // ── WiFi — boot screen stays visible throughout ──────────────────────────────
   unsigned long bootStart = millis();
   WiFi.mode(WIFI_STA);
@@ -1254,8 +1247,6 @@ void setup() {
 //  ── LOOP ─────────────────────────────────────────────────────────────────────
 // =============================================================================
 
-bool lastButtonState = HIGH;
-
 void loop() {
 
   // ── Always-running background tasks ─────────────────────────────────────────
@@ -1264,12 +1255,6 @@ void loop() {
   if (currentState == STATE_IDLE) {
     flushOfflineQueue();
   }
-
-  // ── Button edge detection ────────────────────────────────────────────────────
-  bool buttonState = digitalRead(BUTTON_PIN);
-  bool buttonPressed = (lastButtonState == HIGH && buttonState == LOW);
-  if (buttonPressed) delay(50);  // debounce
-  lastButtonState = buttonState;
 
   // ── State machine ────────────────────────────────────────────────────────────
   switch (currentState) {
@@ -1410,17 +1395,7 @@ void loop() {
           }
         }
 
-        // 3. Physical button IO38 — Print fallback
-        if (digitalRead(BUTTON_PIN) == LOW) {
-          delay(50);
-          if (digitalRead(BUTTON_PIN) == LOW) {
-            Serial.println("[BTN] Physical button — printing");
-            currentState = STATE_PRINTING;
-            break;
-          }
-        }
-
-        // 4. NFC tap
+        // 3. NFC tap
         uint8_t uid[7];
         uint8_t uidLen = 0;
         if (nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLen, 50)) {
