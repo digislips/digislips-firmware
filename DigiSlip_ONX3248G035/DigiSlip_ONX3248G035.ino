@@ -990,6 +990,7 @@ bool supabaseIsClaimed(const String& id) {
   String url = String(SUPABASE_URL) + "/functions/v1/get-slip?id=" + id;
 
   if (!https.begin(client, url)) return false;
+  https.setTimeout(1000);  // cap at 1 s — prevents blocking the NFC scan loop
 
   int code = https.GET();
   bool claimed = false;
