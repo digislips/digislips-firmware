@@ -3,9 +3,8 @@
 
 #pragma once
 
-// WiFi
-#define WIFI_SSID      "YOUR_WIFI_SSID"
-#define WIFI_PASSWORD  "YOUR_WIFI_PASSWORD"
+// WiFi credentials are provisioned at runtime via the captive portal (issue #18).
+// They are stored in NVS (creds namespace) and NOT compiled into the binary.
 
 // Each physical device gets its own ID — change per unit deployed
 #define TILL_ID        "TILL-XX"

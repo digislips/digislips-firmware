@@ -63,9 +63,9 @@ def test_queue_nvs_namespace_not_opened():
 # ── AC 7: WiFi-down path in STATE_UPLOADING goes to STATE_PRINTING ───────────
 
 def test_offline_slip_forwarded_to_printer():
-    # Find the offline-path serial log then check state transition
-    m = re.search(r'No WiFi.*?currentState\s*=\s*(\w+)', SOURCE, re.DOTALL)
-    assert m, "Could not find 'No WiFi' branch in STATE_UPLOADING"
+    # Match the specific serial log in the STATE_UPLOADING offline branch
+    m = re.search(r'\[Offline\] No WiFi.*?currentState\s*=\s*(\w+)', SOURCE, re.DOTALL)
+    assert m, "Could not find '[Offline] No WiFi' branch in STATE_UPLOADING"
     assert m.group(1) == "STATE_PRINTING", \
         f"No-WiFi path transitions to {m.group(1)!r}, expected STATE_PRINTING"
 

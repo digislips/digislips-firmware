@@ -115,7 +115,7 @@ def test_displayBoot_called_in_setup():
 
 def test_no_setTextSize_in_displayBoot():
     # displayBoot is the one helper that must stay FreeFont-only for body text.
-    m = re.search(r"(void\s+displayBoot\s*\(.*?)(?=void\s+displayMessage\s*\()", SOURCE, re.DOTALL)
+    m = re.search(r"(void\s+displayBoot\s*\(.*?)(?=\nvoid\s+\w)", SOURCE, re.DOTALL)
     assert m, "Could not locate displayBoot() body"
     assert "setTextSize" not in m.group(1), \
         "setTextSize() found in displayBoot() — use setFreeFont() instead"
@@ -672,8 +672,6 @@ GITIGNORE = REPO_ROOT / ".gitignore"
 EXAMPLE = Path(__file__).parent / "config.h.example"
 
 REQUIRED_CONFIG_KEYS = [
-    "WIFI_SSID",
-    "WIFI_PASSWORD",
     "TILL_ID",
     "SUPABASE_URL",
     "SUPABASE_ANON",

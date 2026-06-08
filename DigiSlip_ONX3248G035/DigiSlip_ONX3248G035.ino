@@ -291,8 +291,9 @@ String getDateLine() {
 // =============================================================================
 
 void wifiConnect() {
+  DeviceCreds c = credsRead();
   WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  WiFi.begin(c.wifi_ssid.c_str(), c.wifi_pass.c_str());
   Serial.print("[WiFi] Connecting");
   int attempts = 0;
   while (WiFi.status() != WL_CONNECTED && attempts < 20) {
@@ -316,7 +317,7 @@ void wifiWatchdog() {
     if (wifiLostTime == 0) wifiLostTime = millis();
     Serial.println("[WiFi] Lost — reconnecting");
     WiFi.disconnect();
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    { DeviceCreds c = credsRead(); WiFi.begin(c.wifi_ssid.c_str(), c.wifi_pass.c_str()); }
     if (millis() - wifiLostTime > 30000 && currentState != STATE_OFFLINE) {
       preOfflineState = currentState;
       currentState = STATE_OFFLINE;
@@ -457,6 +458,27 @@ void bootProgress(int pct, const char* status) {
   tft.setTextDatum(MC_DATUM);
   tft.setTextColor(COL_MUTED, COL_BG);
   tft.drawString(status, SCREEN_WIDTH / 2, 286);
+}
+
+void displaySetupNeeded() {
+  tft.fillScreen(COL_BG);
+  drawHeader(nullptr, 0, 0, 0, false);
+
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(COL_RED, COL_BG);
+  tft.setTextSize(3);
+  tft.drawString("Setup needed", SCREEN_WIDTH / 2, 195);
+  tft.setTextSize(1);
+
+  tft.setFreeFont(&FreeMono9pt7b);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(COL_FG, COL_BG);
+  tft.drawString("No WiFi credentials found.", SCREEN_WIDTH / 2, 265);
+  tft.setTextColor(COL_MUTED, COL_BG);
+  tft.drawString("Provision via captive portal", SCREEN_WIDTH / 2, 295);
+  tft.drawString("(see setup instructions).", SCREEN_WIDTH / 2, 315);
+
+  drawFooter(TILL_ID "  " FIRMWARE_VERSION);
 }
 
 void displayMessage(const char* line1,
@@ -1163,10 +1185,19 @@ void setup() {
   posSerial.setRxBufferSize(4096);
   Serial.println("[UART1] RX=IO12 TX=IO13 @ 9600");
 
+  // ── NVS credentials check — halt with setup screen if not provisioned ────────
+  if (!credsAreProvisioned()) {
+    Serial.println("[NVS] No credentials — device not provisioned");
+    displaySetupNeeded();
+    while (true) delay(100);
+  }
+  DeviceCreds creds = credsRead();
+  Serial.println("[NVS] Credentials loaded: SSID=" + creds.wifi_ssid);
+
   // ── WiFi — boot screen stays visible throughout ──────────────────────────────
   unsigned long bootStart = millis();
   WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  WiFi.begin(creds.wifi_ssid.c_str(), creds.wifi_pass.c_str());
   for (int i = 0; i < 20 && WiFi.status() != WL_CONNECTED; i++) {
     bootProgress(5 + i * 2, "CONNECTING...");
     delay(500);
