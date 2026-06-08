@@ -65,7 +65,7 @@
 #define MIN_SLIP_BYTES 16
 
 // Firmware version — must match the GitHub release tag exactly (e.g. "v2.3.0")
-#define FIRMWARE_VERSION "v2.3.1"
+#define FIRMWARE_VERSION "v2.4.0"
 
 // =============================================================================
 //  ── PIN DEFINITIONS — ONX3248G035 ───────────────────────────────────────────

@@ -12,8 +12,8 @@ from pathlib import Path
 INO = Path(__file__).parent / "DigiSlip_ONX3248G035.ino"
 SOURCE = INO.read_text(encoding="utf-8")
 
-EXAMPLE = Path(__file__).parent / "config.h.example"
-EXAMPLE_TEXT = EXAMPLE.read_text(encoding="utf-8")
+CONFIG_H = Path(__file__).parent / "config.h"
+CONFIG_H_TEXT = CONFIG_H.read_text(encoding="utf-8")
 
 
 def _setup_body():
@@ -92,15 +92,15 @@ def test_watchdog_uses_nvs_creds_for_reconnect():
         "wifiWatchdog() does not use NVS credentials for WiFi reconnect"
 
 
-# ── AC 9: WIFI_SSID removed from config.h.example ────────────────────────────
+# ── AC 9: WIFI_SSID absent from config.h ─────────────────────────────────────
 
-def test_wifi_ssid_removed_from_example():
-    assert re.search(r"#define\s+WIFI_SSID\b", EXAMPLE_TEXT) is None, \
-        "WIFI_SSID still in config.h.example"
+def test_wifi_ssid_removed_from_config_h():
+    assert re.search(r"#define\s+WIFI_SSID\b", CONFIG_H_TEXT) is None, \
+        "WIFI_SSID still in config.h"
 
 
-# ── AC 10: WIFI_PASSWORD removed from config.h.example ──────────────────────
+# ── AC 10: WIFI_PASSWORD absent from config.h ────────────────────────────────
 
-def test_wifi_password_removed_from_example():
-    assert re.search(r"#define\s+WIFI_PASSWORD\b", EXAMPLE_TEXT) is None, \
-        "WIFI_PASSWORD still in config.h.example"
+def test_wifi_password_removed_from_config_h():
+    assert re.search(r"#define\s+WIFI_PASSWORD\b", CONFIG_H_TEXT) is None, \
+        "WIFI_PASSWORD still in config.h"

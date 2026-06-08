@@ -669,7 +669,7 @@ def test_claimed_state_holds_9s_then_idle():
 
 REPO_ROOT = Path(__file__).parent.parent
 GITIGNORE = REPO_ROOT / ".gitignore"
-EXAMPLE = Path(__file__).parent / "config.h.example"
+CONFIG_H  = Path(__file__).parent / "config.h"
 
 REQUIRED_CONFIG_KEYS = [
     "SUPABASE_URL",
@@ -686,29 +686,36 @@ def test_sketch_includes_config_h():
         'Sketch does not contain #include "config.h"'
 
 
-# ── Behavior 2: config.h is gitignored ───────────────────────────────────────
+# ── Behavior 2: config.h is NOT gitignored (safe to commit — no secrets) ─────
 
-def test_config_h_in_gitignore():
+def test_config_h_not_gitignored():
     text = GITIGNORE.read_text(encoding="utf-8")
     lines = [l.strip() for l in text.splitlines()]
-    assert "config.h" in lines, \
-        "config.h not found in .gitignore"
+    assert "config.h" not in lines, \
+        "config.h is still in .gitignore — it should be committed (no secrets)"
 
 
-# ── Behavior 3: config.h.example exists ──────────────────────────────────────
+# ── Behavior 3: config.h exists and is committed ─────────────────────────────
 
-def test_config_h_example_exists():
-    assert EXAMPLE.exists(), \
-        "config.h.example not found in sketch directory"
+def test_config_h_committed():
+    assert CONFIG_H.exists(), \
+        "config.h not found in sketch directory"
 
 
-# ── Behavior 4: config.h.example defines all required keys ───────────────────
+# ── Behavior 4: config.h.example is deleted ──────────────────────────────────
 
-def test_config_h_example_defines_all_required_keys():
-    text = EXAMPLE.read_text(encoding="utf-8")
+def test_config_h_example_deleted():
+    assert not (Path(__file__).parent / "config.h.example").exists(), \
+        "config.h.example still exists — delete it, config.h is now committed"
+
+
+# ── Behavior 5 (was 4): config.h defines all required keys ───────────────────
+
+def test_config_h_defines_all_required_keys():
+    text = CONFIG_H.read_text(encoding="utf-8")
     for key in REQUIRED_CONFIG_KEYS:
         assert re.search(rf"#define\s+{key}\b", text), \
-            f"config.h.example missing required key: {key}"
+            f"config.h missing required key: {key}"
 
 
 # ── Behavior 5: no credential values remain in the sketch ────────────────────
