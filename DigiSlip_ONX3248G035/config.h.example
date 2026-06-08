@@ -3,20 +3,13 @@
 
 #pragma once
 
-// WiFi credentials are provisioned at runtime via the captive portal (issue #18).
-// They are stored in NVS (creds namespace) and NOT compiled into the binary.
-
-// Each physical device gets its own ID — change per unit deployed
-#define TILL_ID        "TILL-XX"
+// WiFi credentials, device_token, device_id, merchant_id, and till_id are now
+// stored in NVS and fetched from Supabase at boot — NOT compiled into the binary.
+// Use the captive portal (power on with empty NVS) to provision WiFi + token.
 
 // Supabase
-#define SUPABASE_URL   "https://eivctqjisodfhaitzyiq.supabase.co"
+#define SUPABASE_URL   "https://your-project.supabase.co"
 #define SUPABASE_ANON  "YOUR_SUPABASE_ANON_KEY"
-
-// Each physical device gets its own token — generated via provision_device() in Supabase
-#define DEVICE_TOKEN   "YOUR_DEVICE_TOKEN"
-#define DEVICE_ID      "YOUR_DEVICE_UUID"
-#define MERCHANT_ID    "YOUR_MERCHANT_UUID"
 
 // QR code base URL — phone app will open https://digislips.co.za/slip/<slip_uuid>
 #define QR_BASE_URL    "https://digislips.co.za/slip/"

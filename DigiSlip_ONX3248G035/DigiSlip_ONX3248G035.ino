@@ -180,6 +180,12 @@ SystemState preOfflineState = STATE_IDLE;
 // NVS-backed transaction counter (survives reboots)
 uint32_t txCounter = 0;
 
+// Device identity — populated from Supabase at boot using device_token
+String g_deviceId    = "";
+String g_merchantId  = "";
+String g_tillId      = "";
+String g_deviceToken = "";
+
 struct DeviceCreds {
   String wifi_ssid;
   String wifi_pass;
@@ -209,9 +215,10 @@ void saveTxCounter(uint32_t n) {
 
 bool credsAreProvisioned() {
   prefs.begin("creds", true);
-  String ssid = prefs.getString("wifi_ssid", "");
+  String ssid  = prefs.getString("wifi_ssid",    "");
+  String token = prefs.getString("device_token", "");
   prefs.end();
-  return ssid.length() > 0;
+  return ssid.length() > 0 && token.length() > 0;
 }
 
 DeviceCreds credsRead() {
@@ -238,6 +245,50 @@ void credsClear() {
   prefs.remove("wifi_pass");
   prefs.remove("device_token");
   prefs.end();
+}
+
+// =============================================================================
+//  ── DEVICE IDENTITY FETCH ────────────────────────────────────────────────────
+// =============================================================================
+
+bool fetchDeviceIdentity(const String& token) {
+  if (WiFi.status() != WL_CONNECTED) return false;
+
+  WiFiClientSecure client;
+  client.setInsecure();
+
+  HTTPClient https;
+  String url = String(SUPABASE_URL)
+    + "/rest/v1/devices?device_token=eq." + token
+    + "&select=id,merchant_id,nickname&limit=1";
+
+  if (!https.begin(client, url)) return false;
+  https.addHeader("apikey", SUPABASE_ANON);
+  https.addHeader("Authorization", "Bearer " + String(SUPABASE_ANON));
+
+  int code = https.GET();
+  bool ok  = false;
+
+  if (code == 200) {
+    DynamicJsonDocument doc(512);
+    if (deserializeJson(doc, https.getString()) == DeserializationError::Ok
+        && doc.is<JsonArray>() && doc.size() > 0) {
+      g_deviceId   = doc[0]["id"].as<String>();
+      g_merchantId = doc[0]["merchant_id"].as<String>();
+      g_tillId     = doc[0]["nickname"].as<String>();
+      ok = g_deviceId.length() > 0 && g_merchantId.length() > 0;
+      Serial.println("[Identity] device_id="   + g_deviceId);
+      Serial.println("[Identity] merchant_id=" + g_merchantId);
+      Serial.println("[Identity] till_id="     + g_tillId);
+    } else {
+      Serial.println("[Identity] Empty result — device_token not found in devices table");
+    }
+  } else {
+    Serial.println("[Identity] Fetch failed: HTTP " + String(code));
+  }
+
+  https.end();
+  return ok;
 }
 
 // =============================================================================
@@ -448,7 +499,7 @@ void displayBoot(int progress) {
   tft.setTextDatum(MC_DATUM);
   tft.setTextColor(COL_MUTED, COL_BG);
   tft.drawString("STARTING UP", SCREEN_WIDTH / 2, 286);
-  drawFooter(TILL_ID "  " FIRMWARE_VERSION);
+  drawFooter((g_tillId + "  " + FIRMWARE_VERSION).c_str());
 }
 
 void bootProgress(int pct, const char* status) {
@@ -480,7 +531,7 @@ void displaySetupNeeded() {
   tft.drawString("Provision via captive portal", SCREEN_WIDTH / 2, 295);
   tft.drawString("(see setup instructions).", SCREEN_WIDTH / 2, 315);
 
-  drawFooter(TILL_ID "  " FIRMWARE_VERSION);
+  drawFooter((g_tillId + "  " + FIRMWARE_VERSION).c_str());
 }
 
 void displayProvisioningPortal(const char* apName) {
@@ -511,7 +562,7 @@ void displayProvisioningPortal(const char* apName) {
   tft.drawString("3. Enter WiFi + token,", SCREEN_WIDTH / 2, 326);
   tft.drawString("   then tap Save.", SCREEN_WIDTH / 2, 346);
 
-  drawFooter(TILL_ID "  setup mode");
+  drawFooter((g_tillId + "  setup mode").c_str());
 }
 
 void startProvisioningPortal() {
@@ -610,7 +661,7 @@ void displayIdle() {
   tft.setTextDatum(MC_DATUM);
   tft.drawString(getDateLine(), SCREEN_WIDTH / 2, 446);
 
-  drawFooter(TILL_ID "  " FIRMWARE_VERSION);
+  drawFooter((g_tillId + "  " + FIRMWARE_VERSION).c_str());
 }
 
 void drawQR(const char* text) {
@@ -692,7 +743,7 @@ void drawPrinting() {
   tft.setTextColor(COL_MUTED, COL_BG);
   tft.drawString(("Slip #" + String(txCounter)).c_str(), SCREEN_WIDTH / 2, 248);
 
-  drawFooter(TILL_ID "  " FIRMWARE_VERSION);
+  drawFooter((g_tillId + "  " + FIRMWARE_VERSION).c_str());
 }
 
 // =============================================================================
@@ -807,7 +858,7 @@ void drawClaimed() {
   drawPill(SCREEN_WIDTH / 2, 292, "VERIFIED", COL_GREEN_LT, COL_GREEN_BD, COL_GREEN_DK, true, COL_GREEN);
   tft.setTextDatum(MC_DATUM);
 
-  drawFooter(TILL_ID "  returning to idle");
+  drawFooter((g_tillId + "  returning to idle").c_str());
 }
 
 // =============================================================================
@@ -840,7 +891,7 @@ void drawOffline() {
   tft.drawString("Print slips manually until", SCREEN_WIDTH / 2, 226);
   tft.drawString("WiFi is restored.", SCREEN_WIDTH / 2, 246);
 
-  drawFooter(TILL_ID "  check router");
+  drawFooter((g_tillId + "  check router").c_str());
 }
 
 // =============================================================================
@@ -968,8 +1019,8 @@ String buildSupabaseJSON(const String& timestamp, const String& uuid) {
 
   DynamicJsonDocument doc(4096);
   doc["id"] = uuid;
-  doc["device_id"] = DEVICE_ID;
-  doc["merchant_id"] = MERCHANT_ID;
+  doc["device_id"] = g_deviceId;
+  doc["merchant_id"] = g_merchantId;
   doc["raw_text"] = rawText;
   doc["created_at"] = timestamp;
 
@@ -1038,7 +1089,7 @@ bool supabaseNfcClaim(const String& slipId, const String& uid) {
   https.addHeader("Content-Type", "application/json");
   https.addHeader("apikey", SUPABASE_ANON);
   https.addHeader("Authorization", "Bearer " + String(SUPABASE_ANON));
-  https.addHeader("X-Device-Token", DEVICE_TOKEN);
+  https.addHeader("X-Device-Token", g_deviceToken);
 
   DynamicJsonDocument doc(256);
   doc["slip_id"] = slipId;
@@ -1258,6 +1309,7 @@ void setup() {
     startProvisioningPortal();  // blocks, then ESP.restart()
   }
   DeviceCreds creds = credsRead();
+  g_deviceToken = creds.device_token;
   Serial.println("[NVS] Credentials loaded: SSID=" + creds.wifi_ssid);
 
   // ── WiFi — boot screen stays visible throughout ──────────────────────────────
@@ -1288,6 +1340,12 @@ void setup() {
       Serial.println("[NTP] FAILED — will retry");
       bootProgress(90, "TIME FAILED");
     }
+    bootProgress(92, "IDENTIFYING...");
+    if (!fetchDeviceIdentity(g_deviceToken)) {
+      displayMessage("Identity error", "Check device token", "in Supabase");
+      while (true) delay(100);
+    }
+    bootProgress(98, "IDENTIFIED");
   } else {
     Serial.println("[WiFi] FAILED — offline mode");
     bootProgress(50, "OFFLINE MODE");
