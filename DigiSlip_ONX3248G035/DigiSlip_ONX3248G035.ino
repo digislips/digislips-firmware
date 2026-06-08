@@ -227,6 +227,7 @@ DeviceCreds credsRead() {
   c.wifi_ssid    = prefs.getString("wifi_ssid",    "");
   c.wifi_pass    = prefs.getString("wifi_pass",    "");
   c.device_token = prefs.getString("device_token", "");
+  c.device_token.trim();
   prefs.end();
   return c;
 }
@@ -589,6 +590,7 @@ void startProvisioningPortal() {
     String ssid  = wm.getWiFiSSID();
     String pass  = wm.getWiFiPass();
     String token = String(tokenParam.getValue());
+    token.trim();
     Serial.println("[Portal] Saving credentials: SSID=" + ssid);
     credsWrite(ssid.c_str(), pass.c_str(), token.c_str());
   } else {
