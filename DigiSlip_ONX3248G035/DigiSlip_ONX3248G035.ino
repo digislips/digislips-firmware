@@ -1020,8 +1020,6 @@ String buildSupabaseJSON(const String& timestamp, const String& uuid) {
 
   DynamicJsonDocument doc(4096);
   doc["id"] = uuid;
-  doc["device_id"] = g_deviceId;
-  doc["merchant_id"] = g_merchantId;
   doc["raw_text"] = rawText;
   doc["created_at"] = timestamp;
 
@@ -1041,7 +1039,7 @@ String supabasePost(const String& json) {
   client.setInsecure();
 
   HTTPClient https;
-  String url = String(SUPABASE_URL) + "/rest/v1/slips";
+  String url = String(SUPABASE_URL) + "/functions/v1/create-slip";
 
   if (!https.begin(client, url)) {
     Serial.println("[Supabase] begin() failed");
@@ -1051,14 +1049,14 @@ String supabasePost(const String& json) {
   https.addHeader("Content-Type", "application/json");
   https.addHeader("apikey", SUPABASE_ANON);
   https.addHeader("Authorization", "Bearer " + String(SUPABASE_ANON));
-  https.addHeader("Prefer", "return=minimal");
+  https.addHeader("X-Device-Token", g_deviceToken);
 
   int code = https.POST(json);
 
   String newSlipId = "";
   if (code >= 200 && code < 300) {
     DynamicJsonDocument doc(512);
-    if (deserializeJson(doc, json) == DeserializationError::Ok) {
+    if (deserializeJson(doc, https.getString()) == DeserializationError::Ok) {
       newSlipId = doc["id"].as<String>();
     }
     Serial.println("[Supabase] POST OK → " + newSlipId);
