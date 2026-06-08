@@ -11,7 +11,7 @@
 //    • If claimed digitally → print is blocked (green flow)
 //    • Touch buttons: Print (forward to printer) / Cancel (discard)
 //    • If neither tapped within 60s → device returns to IDLE (no print)
-//    • Offline queue: if WiFi down, stores up to 5 transactions in NVS
+//    • If offline: ESC/POS buffer forwarded directly to the thermal printer
 //
 //  Board: ONX3248G035 (Nextion Genius Series)
 //    MCU:     ESP32-S3R8 (8MB PSRAM, 16MB Flash)
@@ -61,9 +61,6 @@
 
 // Minimum bytes to treat a UART burst as a real ESC/POS slip (filters line noise)
 #define MIN_SLIP_BYTES 16
-
-// Offline queue
-#define OFFLINE_QUEUE_SIZE 5  // max queued transactions when WiFi is down
 
 // Firmware version — must match the GitHub release tag exactly (e.g. "v2.3.0")
 #define FIRMWARE_VERSION "v2.3.1"
@@ -139,7 +136,6 @@ enum SystemState {
   STATE_CLAIMED,        // digital claim confirmed — no print
   STATE_CANCELLED,      // 1-second confirmation after cashier cancels
   STATE_PRINTING,       // forwarding buffer to printer
-  STATE_OFFLINE_QUEUE,  // WiFi down — store in NVS, retry later
   STATE_OFFLINE,        // WiFi lost >30 s — dedicated offline screen
   STATE_ERROR           // recoverable error display
 };
@@ -183,54 +179,6 @@ SystemState preOfflineState = STATE_IDLE;
 uint32_t txCounter = 0;
 
 // =============================================================================
-//  ── OFFLINE QUEUE  (NVS) ─────────────────────────────────────────────────────
-// =============================================================================
-
-int offlineQueueLen() {
-  prefs.begin("queue", true);
-  int n = prefs.getInt("qlen", 0);
-  prefs.end();
-  return n;
-}
-
-bool offlineQueuePush(const String& json) {
-  prefs.begin("queue", false);
-  int n = prefs.getInt("qlen", 0);
-  if (n >= OFFLINE_QUEUE_SIZE) {
-    prefs.end();
-    Serial.println("[Queue] Full — dropping oldest");
-    prefs.begin("queue", false);
-    for (int i = 0; i < OFFLINE_QUEUE_SIZE - 1; i++) {
-      String val = prefs.getString(("q" + String(i + 1)).c_str(), "");
-      prefs.putString(("q" + String(i)).c_str(), val);
-    }
-    n = OFFLINE_QUEUE_SIZE - 1;
-  }
-  prefs.putString(("q" + String(n)).c_str(), json);
-  prefs.putInt("qlen", n + 1);
-  prefs.end();
-  Serial.println("[Queue] Stored. Depth: " + String(n + 1));
-  return true;
-}
-
-String offlineQueuePop() {
-  prefs.begin("queue", false);
-  int n = prefs.getInt("qlen", 0);
-  if (n == 0) {
-    prefs.end();
-    return "";
-  }
-  String val = prefs.getString("q0", "");
-  for (int i = 0; i < n - 1; i++) {
-    String next = prefs.getString(("q" + String(i + 1)).c_str(), "");
-    prefs.putString(("q" + String(i)).c_str(), next);
-  }
-  prefs.putInt("qlen", n - 1);
-  prefs.end();
-  return val;
-}
-
-// =============================================================================
 //  ── NVS TRANSACTION COUNTER ──────────────────────────────────────────────────
 // =============================================================================
 
@@ -244,6 +192,49 @@ uint32_t loadTxCounter() {
 void saveTxCounter(uint32_t n) {
   prefs.begin("system", false);
   prefs.putUInt("txcount", n);
+  prefs.end();
+}
+
+// =============================================================================
+//  ── NVS CREDENTIALS (creds namespace) ────────────────────────────────────────
+// =============================================================================
+
+bool credsAreProvisioned() {
+  prefs.begin("creds", true);
+  String ssid = prefs.getString("wifi_ssid", "");
+  prefs.end();
+  return ssid.length() > 0;
+}
+
+struct DeviceCreds {
+  String wifi_ssid;
+  String wifi_pass;
+  String device_token;
+};
+
+DeviceCreds credsRead() {
+  DeviceCreds c;
+  prefs.begin("creds", true);
+  c.wifi_ssid    = prefs.getString("wifi_ssid",    "");
+  c.wifi_pass    = prefs.getString("wifi_pass",    "");
+  c.device_token = prefs.getString("device_token", "");
+  prefs.end();
+  return c;
+}
+
+void credsWrite(const char* wifi_ssid, const char* wifi_pass, const char* device_token) {
+  prefs.begin("creds", false);
+  prefs.putString("wifi_ssid",    wifi_ssid);
+  prefs.putString("wifi_pass",    wifi_pass);
+  prefs.putString("device_token", device_token);
+  prefs.end();
+}
+
+void credsClear() {
+  prefs.begin("creds", false);
+  prefs.remove("wifi_ssid");
+  prefs.remove("wifi_pass");
+  prefs.remove("device_token");
   prefs.end();
 }
 
@@ -757,8 +748,8 @@ void drawOffline() {
   tft.setFreeFont(&FreeMono9pt7b);
   tft.setTextDatum(MC_DATUM);
   tft.setTextColor(COL_MUTED, COL_BG);
-  tft.drawString("Slips will queue locally and", SCREEN_WIDTH / 2, 226);
-  tft.drawString("upload when WiFi returns.", SCREEN_WIDTH / 2, 246);
+  tft.drawString("Print slips manually until", SCREEN_WIDTH / 2, 226);
+  tft.drawString("WiFi is restored.", SCREEN_WIDTH / 2, 246);
 
   drawFooter(TILL_ID "  check router");
 }
@@ -1005,32 +996,6 @@ bool supabaseIsClaimed(const String& id) {
 }
 
 // =============================================================================
-//  ── OFFLINE QUEUE FLUSH ───────────────────────────────────────────────────────
-// =============================================================================
-
-void flushOfflineQueue() {
-  if (WiFi.status() != WL_CONNECTED) return;
-  int depth = offlineQueueLen();
-  if (depth == 0) return;
-
-  Serial.println("[Queue] Flushing " + String(depth) + " queued slips");
-
-  while (offlineQueueLen() > 0) {
-    String json = offlineQueuePop();
-    if (json.length() == 0) break;
-    String id = supabasePost(json);
-    if (id.length() > 0) {
-      Serial.println("[Queue] Flushed → " + id);
-    } else {
-      Serial.println("[Queue] Flush failed — re-queuing");
-      offlineQueuePush(json);
-      break;
-    }
-    delay(200);
-  }
-}
-
-// =============================================================================
 //  ── OTA UPDATE ───────────────────────────────────────────────────────────────
 // =============================================================================
 
@@ -1252,10 +1217,6 @@ void loop() {
   // ── Always-running background tasks ─────────────────────────────────────────
   wifiWatchdog();
 
-  if (currentState == STATE_IDLE) {
-    flushOfflineQueue();
-  }
-
   // ── State machine ────────────────────────────────────────────────────────────
   switch (currentState) {
 
@@ -1339,18 +1300,14 @@ void loop() {
             drawQR(qrURL.c_str());
 
           } else {
-            Serial.println("[Supabase] POST failed — queuing offline");
-            offlineQueuePush(json);
+            Serial.println("[Supabase] POST failed — printing immediately");
             currentState = STATE_WAITING_CLAIM;
             claimWindowStart = millis();
             displayMessage("Upload failed", "Tap Print for paper");
           }
         } else {
-          offlineQueuePush(json);
-          Serial.println("[Offline] Queued TX#" + String(txCounter));
-          currentState = STATE_WAITING_CLAIM;
-          claimWindowStart = millis();
-          displayMessage("No WiFi", "Tap Print for paper");
+          Serial.println("[Offline] No WiFi — printing immediately");
+          currentState = STATE_PRINTING;
         }
         break;
       }
@@ -1528,27 +1485,9 @@ void loop() {
     case STATE_OFFLINE:
       {
         static bool offlineDrawn = false;
-        static unsigned long lastOfflineUpdate = 0;
         if (!offlineDrawn) {
           drawOffline();
           offlineDrawn = true;
-        }
-        // Update info cards every second
-        if (millis() - lastOfflineUpdate >= 1000) {
-          lastOfflineUpdate = millis();
-          int depth = offlineQueueLen();
-          char queuedStr[8];
-          sprintf(queuedStr, "%d", depth);
-          // Info card: queued slips
-          tft.setFreeFont(&FreeMono9pt7b);
-          tft.setTextDatum(ML_DATUM);
-          tft.setTextColor(COL_FG, COL_CARD);
-          tft.fillRoundRect(22, 278, SCREEN_WIDTH - 44, 36, 6, COL_CARD);
-          tft.drawRoundRect(22, 278, SCREEN_WIDTH - 44, 36, 6, COL_FAINT);
-          tft.drawString("Queued slips", 34, 296);
-          tft.setTextDatum(MR_DATUM);
-          tft.drawString(queuedStr, SCREEN_WIDTH - 34, 296);
-          tft.setTextDatum(MC_DATUM);
         }
         // wifiWatchdog handles reconnect and state restore
         if (WiFi.status() == WL_CONNECTED) offlineDrawn = false;

@@ -542,12 +542,14 @@ def test_offline_headline_text():
         '"Lost connection" headline not found in drawOffline()'
 
 
-# ── Behavior 8: queued slip count shown in STATE_OFFLINE ─────────────────────
+# ── Behavior 8: queue depth card removed from STATE_OFFLINE ──────────────────
 
-def test_offline_shows_queue_depth():
+def test_offline_no_queue_card():
     body = _offline_state_body()
-    assert "offlineQueueLen" in body, \
-        "offlineQueueLen() not called in STATE_OFFLINE — queue depth not shown"
+    assert "offlineQueueLen" not in body, \
+        "offlineQueueLen() still rendered in STATE_OFFLINE — queue card not removed"
+    assert "Queued slips" not in body, \
+        '"Queued slips" card still rendered in STATE_OFFLINE'
 
 
 # ── Behavior 9: footer reads "check router" ──────────────────────────────────
