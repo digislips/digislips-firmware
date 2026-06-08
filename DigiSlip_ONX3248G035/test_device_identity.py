@@ -11,8 +11,8 @@ from pathlib import Path
 INO = Path(__file__).parent / "DigiSlip_ONX3248G035.ino"
 SOURCE = INO.read_text(encoding="utf-8")
 
-EXAMPLE = Path(__file__).parent / "config.h.example"
-EXAMPLE_TEXT = EXAMPLE.read_text(encoding="utf-8")
+CONFIG_H = Path(__file__).parent / "config.h"
+CONFIG_H_TEXT = CONFIG_H.read_text(encoding="utf-8")
 
 
 def _fetch_body():
@@ -176,9 +176,9 @@ def test_creds_provisioned_checks_device_token():
         "credsAreProvisioned() does not check device_token — missing token should trigger portal"
 
 
-# ── AC 11: DEVICE_ID / MERCHANT_ID / TILL_ID / DEVICE_TOKEN removed from example
+# ── AC 11: DEVICE_ID / MERCHANT_ID / TILL_ID / DEVICE_TOKEN absent from config.h
 
-def test_defines_removed_from_example():
+def test_defines_removed_from_config_h():
     for key in ("DEVICE_ID", "MERCHANT_ID", "TILL_ID", "DEVICE_TOKEN"):
-        assert re.search(rf"#define\s+{key}\b", EXAMPLE_TEXT) is None, \
-            f"{key} still in config.h.example"
+        assert re.search(rf"#define\s+{key}\b", CONFIG_H_TEXT) is None, \
+            f"{key} still in config.h — must not be a compile-time constant"
