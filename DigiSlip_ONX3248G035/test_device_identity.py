@@ -97,14 +97,14 @@ def test_fetch_device_identity_defined():
 
 def test_fetch_queries_devices_table():
     body = _fetch_body()
-    assert "/rest/v1/devices" in body, \
-        "fetchDeviceIdentity() does not query /rest/v1/devices"
+    assert "/functions/v1/get-device-identity" in body, \
+        "fetchDeviceIdentity() does not call get-device-identity Edge Function"
 
 
 def test_fetch_filters_by_device_token():
     body = _fetch_body()
-    assert "device_token" in body, \
-        "fetchDeviceIdentity() does not filter by device_token"
+    assert "X-Device-Token" in body, \
+        "fetchDeviceIdentity() does not pass X-Device-Token header"
 
 
 # ── AC 4: fetch populates all three globals ───────────────────────────────────

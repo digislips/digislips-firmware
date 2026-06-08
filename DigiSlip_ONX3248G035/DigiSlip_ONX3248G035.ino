@@ -259,13 +259,12 @@ bool fetchDeviceIdentity(const String& token) {
   client.setInsecure();
 
   HTTPClient https;
-  String url = String(SUPABASE_URL)
-    + "/rest/v1/devices?device_token=eq." + token
-    + "&select=id,merchant_id,nickname&limit=1";
+  String url = String(SUPABASE_URL) + "/functions/v1/get-device-identity";
 
   if (!https.begin(client, url)) return false;
-  https.addHeader("apikey", SUPABASE_ANON);
-  https.addHeader("Authorization", "Bearer " + String(SUPABASE_ANON));
+  https.addHeader("apikey",           SUPABASE_ANON);
+  https.addHeader("Authorization",    "Bearer " + String(SUPABASE_ANON));
+  https.addHeader("X-Device-Token",   token);
 
   int code = https.GET();
   bool ok  = false;
@@ -273,16 +272,16 @@ bool fetchDeviceIdentity(const String& token) {
   if (code == 200) {
     DynamicJsonDocument doc(512);
     if (deserializeJson(doc, https.getString()) == DeserializationError::Ok
-        && doc.is<JsonArray>() && doc.size() > 0) {
-      g_deviceId   = doc[0]["id"].as<String>();
-      g_merchantId = doc[0]["merchant_id"].as<String>();
-      g_tillId     = doc[0]["nickname"].as<String>();
+        && doc.is<JsonObject>()) {
+      g_deviceId   = doc["id"].as<String>();
+      g_merchantId = doc["merchant_id"].as<String>();
+      g_tillId     = doc["nickname"].as<String>();
       ok = g_deviceId.length() > 0 && g_merchantId.length() > 0;
       Serial.println("[Identity] device_id="   + g_deviceId);
       Serial.println("[Identity] merchant_id=" + g_merchantId);
       Serial.println("[Identity] till_id="     + g_tillId);
     } else {
-      Serial.println("[Identity] Empty result — device_token not found in devices table");
+      Serial.println("[Identity] Device not found — check device_token in Supabase");
     }
   } else {
     Serial.println("[Identity] Fetch failed: HTTP " + String(code));
