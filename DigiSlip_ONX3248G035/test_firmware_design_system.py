@@ -672,12 +672,8 @@ GITIGNORE = REPO_ROOT / ".gitignore"
 EXAMPLE = Path(__file__).parent / "config.h.example"
 
 REQUIRED_CONFIG_KEYS = [
-    "TILL_ID",
     "SUPABASE_URL",
     "SUPABASE_ANON",
-    "DEVICE_TOKEN",
-    "DEVICE_ID",
-    "MERCHANT_ID",
     "QR_BASE_URL",
     "NTP_SERVER",
     "TZ_OFFSET",
