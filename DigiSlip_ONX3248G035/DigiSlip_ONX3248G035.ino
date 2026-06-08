@@ -33,6 +33,7 @@
 //    Adafruit PN532          — NFC reader
 //    QRCodeGenerator         — QR rendering
 //    ArduinoJson (v6)        — JSON building
+//    WiFiManager (tzapu)     — captive portal provisioning
 //    WiFi, WiFiClientSecure, HTTPClient — built-in for ESP32
 //    Preferences             — built-in NVS wrapper for ESP32
 //    time.h                  — built-in NTP / SNTP
@@ -40,6 +41,7 @@
 
 #include <Wire.h>
 #include <WiFi.h>
+#include <WiFiManager.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <HTTPUpdate.h>
@@ -479,6 +481,71 @@ void displaySetupNeeded() {
   tft.drawString("(see setup instructions).", SCREEN_WIDTH / 2, 315);
 
   drawFooter(TILL_ID "  " FIRMWARE_VERSION);
+}
+
+void displayProvisioningPortal(const char* apName) {
+  tft.fillScreen(COL_BG);
+  drawHeader(nullptr, 0, 0, 0, false);
+
+  tft.setFreeFont(&FreeSansBold9pt7b);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(COL_BLUE, COL_BG);
+  tft.drawString("Setup mode", SCREEN_WIDTH / 2, 96);
+
+  // AP name card
+  tft.fillRoundRect(22, 114, SCREEN_WIDTH - 44, 36, 6, COL_CARD);
+  tft.drawRoundRect(22, 114, SCREEN_WIDTH - 44, 36, 6, COL_FAINT);
+  tft.setFreeFont(&FreeMono9pt7b);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(COL_BLUE, COL_CARD);
+  tft.drawString(apName, SCREEN_WIDTH / 2, 132);
+
+  // Instructions
+  tft.setTextColor(COL_FG, COL_BG);
+  tft.drawString("1. Connect phone to WiFi:", SCREEN_WIDTH / 2, 186);
+  tft.setTextColor(COL_BLUE, COL_BG);
+  tft.drawString(apName, SCREEN_WIDTH / 2, 206);
+  tft.setTextColor(COL_FG, COL_BG);
+  tft.drawString("2. Open browser — setup", SCREEN_WIDTH / 2, 256);
+  tft.drawString("   page loads automatically.", SCREEN_WIDTH / 2, 276);
+  tft.drawString("3. Enter WiFi + token,", SCREEN_WIDTH / 2, 326);
+  tft.drawString("   then tap Save.", SCREEN_WIDTH / 2, 346);
+
+  drawFooter(TILL_ID "  setup mode");
+}
+
+void startProvisioningPortal() {
+  uint8_t mac[6];
+  WiFi.macAddress(mac);
+  char apName[24];
+  snprintf(apName, sizeof(apName), "DigiSlips-Setup-%02X%02X", mac[4], mac[5]);
+  Serial.println("[Portal] Starting softAP: " + String(apName));
+
+  displayProvisioningPortal(apName);
+
+  WiFiManager wm;
+  wm.setDebugOutput(false);
+
+  // Custom parameter: Device Token (64-char hex + null)
+  WiFiManagerParameter tokenParam("token", "Device Token", "", 65);
+  wm.addParameter(&tokenParam);
+
+  // Block until user submits or 5-minute timeout
+  wm.setConfigPortalTimeout(300);
+  bool connected = wm.startConfigPortal(apName);
+
+  if (connected) {
+    String ssid  = wm.getWiFiSSID();
+    String pass  = wm.getWiFiPass();
+    String token = String(tokenParam.getValue());
+    Serial.println("[Portal] Saving credentials: SSID=" + ssid);
+    credsWrite(ssid.c_str(), pass.c_str(), token.c_str());
+  } else {
+    Serial.println("[Portal] Timeout — rebooting to retry");
+  }
+
+  delay(1000);
+  ESP.restart();
 }
 
 void displayMessage(const char* line1,
@@ -1185,11 +1252,10 @@ void setup() {
   posSerial.setRxBufferSize(4096);
   Serial.println("[UART1] RX=IO12 TX=IO13 @ 9600");
 
-  // ── NVS credentials check — halt with setup screen if not provisioned ────────
+  // ── NVS credentials check — start captive portal if not provisioned ──────────
   if (!credsAreProvisioned()) {
-    Serial.println("[NVS] No credentials — device not provisioned");
-    displaySetupNeeded();
-    while (true) delay(100);
+    Serial.println("[NVS] No credentials — starting captive portal");
+    startProvisioningPortal();  // blocks, then ESP.restart()
   }
   DeviceCreds creds = credsRead();
   Serial.println("[NVS] Credentials loaded: SSID=" + creds.wifi_ssid);
@@ -1255,6 +1321,23 @@ void loop() {
     case STATE_IDLE:
       {
         displayIdle();
+
+        // 5-second touch hold → clear creds and reboot into portal
+        {
+          static unsigned long touchHoldStart = 0;
+          int16_t tx, ty;
+          if (readTouch(tx, ty)) {
+            if (touchHoldStart == 0) touchHoldStart = millis();
+            if (millis() - touchHoldStart >= 5000) {
+              Serial.println("[Provision] 5s hold — clearing creds, rebooting");
+              credsClear();
+              delay(100);
+              ESP.restart();
+            }
+          } else {
+            touchHoldStart = 0;
+          }
+        }
 
         if (posSerial.available()) {
           printBufferLen = 0;
