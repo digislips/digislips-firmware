@@ -178,6 +178,12 @@ SystemState preOfflineState = STATE_IDLE;
 // NVS-backed transaction counter (survives reboots)
 uint32_t txCounter = 0;
 
+struct DeviceCreds {
+  String wifi_ssid;
+  String wifi_pass;
+  String device_token;
+};
+
 // =============================================================================
 //  ── NVS TRANSACTION COUNTER ──────────────────────────────────────────────────
 // =============================================================================
@@ -205,12 +211,6 @@ bool credsAreProvisioned() {
   prefs.end();
   return ssid.length() > 0;
 }
-
-struct DeviceCreds {
-  String wifi_ssid;
-  String wifi_pass;
-  String device_token;
-};
 
 DeviceCreds credsRead() {
   DeviceCreds c;
