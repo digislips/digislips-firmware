@@ -7,3 +7,12 @@ __pycache__/
 *.pyc
 *.pyo
 *.ttf
+
+# Old hardware — not in active development
+DigiSlip_ESP32/
+
+# Internal — not for public repo
+CLAUDE.md
+CONTEXT.md
+docs/
+supabase/
