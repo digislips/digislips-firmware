@@ -51,6 +51,7 @@
 #include <ArduinoJson.h>
 #include <Preferences.h>
 #include <time.h>
+#include "driver/i2s.h"
 #include "wordmark_38.h"
 #include "wordmark_22.h"
 #include "config.h"  // per-device credentials — copy config.h.example → config.h and fill in
@@ -78,6 +79,13 @@
 // I2C — Grove I2C connector (also used by touch CST826 and RTC internally)
 #define I2C_SDA 8
 #define I2C_SCL 7
+
+// I2S audio — NS4168 Class D BTL amp → SPK connector
+#define I2S_BCLK_PIN  14
+#define I2S_LRCLK_PIN 16
+#define I2S_DATA_PIN  15
+#define BUZZ_SHORT_MS 80
+#define BUZZ_LONG_MS  300
 
 // Backlight — controlled by board, set HIGH to enable
 #define TFT_BL_PIN 6
@@ -1238,6 +1246,54 @@ void applyOTA(String url) {
 }
 
 // =============================================================================
+//  ── AUDIO — NS4168 I2S amp via SPK connector ─────────────────────────────────
+// =============================================================================
+
+void buzzSetup() {
+  i2s_config_t cfg = {
+    .mode                 = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX),
+    .sample_rate          = 44100,
+    .bits_per_sample      = I2S_BITS_PER_SAMPLE_16BIT,
+    .channel_format       = I2S_CHANNEL_FMT_RIGHT_LEFT,
+    .communication_format = I2S_COMM_FORMAT_STAND_I2S,
+    .intr_alloc_flags     = ESP_INTR_FLAG_LEVEL1,
+    .dma_buf_count        = 4,
+    .dma_buf_len          = 256,
+    .use_apll             = false,
+    .tx_desc_auto_clear   = true,
+  };
+  i2s_driver_install(I2S_NUM_0, &cfg, 0, NULL);
+
+  i2s_pin_config_t pins = {
+    .mck_io_num   = I2S_PIN_NO_CHANGE,
+    .bck_io_num   = I2S_BCLK_PIN,
+    .ws_io_num    = I2S_LRCLK_PIN,
+    .data_out_num = I2S_DATA_PIN,
+    .data_in_num  = I2S_PIN_NO_CHANGE,
+  };
+  i2s_set_pin(I2S_NUM_0, &pins);
+}
+
+void buzz(int durationMs) {
+  // One period of 2300Hz at 44100Hz: 44100/2300 = 19 samples (~2321Hz, inaudible diff)
+  const int period = 44100 / 2300;
+  int16_t wave[period * 2];  // stereo interleaved L+R
+  for (int i = 0; i < period; i++) {
+    int16_t s = (int16_t)(20000.0f * sinf(2.0f * (float)M_PI * i / period));
+    wave[i * 2]     = s;
+    wave[i * 2 + 1] = s;
+  }
+  const int totalSamples = (44100 * durationMs) / 1000;
+  int sent = 0;
+  size_t written;
+  while (sent < totalSamples) {
+    int n = min(period, totalSamples - sent);
+    i2s_write(I2S_NUM_0, wave, n * 4, &written, portMAX_DELAY);
+    sent += n;
+  }
+}
+
+// =============================================================================
 //  ── SETUP ────────────────────────────────────────────────────────────────────
 // =============================================================================
 
@@ -1302,6 +1358,10 @@ void setup() {
   posSerial.setRxBufferSize(4096);
   Serial.println("[UART1] RX=IO12 TX=IO13 @ 9600");
 
+  // ── I2S audio — NS4168 amp ───────────────────────────────────────────────────
+  buzzSetup();
+  Serial.println("[I2S] BCLK=IO14 DATA=IO15 LRCLK=IO16 — NS4168 ready");
+
   // ── NVS credentials check — start captive portal if not provisioned ──────────
   if (!credsAreProvisioned()) {
     Serial.println("[NVS] No credentials — starting captive portal");
@@ -1357,6 +1417,7 @@ void setup() {
   if (remaining > 0) delay((unsigned long)remaining);
 
   // ── Ready ───────────────────────────────────────────────────────────────────
+  buzz(BUZZ_SHORT_MS);
   currentState = STATE_IDLE;
   lastIdleRefresh = 0;
   Serial.println("[SYS] Ready\n");
@@ -1508,11 +1569,13 @@ void loop() {
             lastTouchTime = millis();
             if (tx >= BTN_PRINT_X && tx < BTN_PRINT_X + BTN_PRINT_W && ty >= BTN_PRINT_Y && ty < BTN_PRINT_Y + BTN_PRINT_H) {
               Serial.println("[BTN] Print tapped");
+              buzz(BUZZ_SHORT_MS);
               currentState = STATE_PRINTING;
               break;
             }
             if (tx >= BTN_CANCEL_X && tx < BTN_CANCEL_X + BTN_CANCEL_W && ty >= BTN_CANCEL_Y && ty < BTN_CANCEL_Y + BTN_CANCEL_H) {
               Serial.println("[BTN] Cancel tapped");
+              buzz(BUZZ_SHORT_MS);
               printBufferLen = 0;
               receiptLineCount = 0;
               slipId = "";
@@ -1536,6 +1599,7 @@ void loop() {
           nfcUID.toUpperCase();
           Serial.println("[NFC] UID: " + nfcUID);
 
+          buzz(BUZZ_LONG_MS);
           drawNfcLinking(nfcUID);
 
           if (slipId.length() > 0) {
