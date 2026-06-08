@@ -68,16 +68,12 @@ def test_setup_checks_provisioning_before_wifi():
         "credsAreProvisioned() must be called before WiFi.begin() in setup()"
 
 
-# ── AC 6: setup() shows setup screen then halts when not provisioned ──────────
+# ── AC 6: setup() starts captive portal when not provisioned (not a bare halt) ─
 
-def test_setup_shows_screen_and_halts_when_empty():
+def test_setup_starts_portal_when_empty():
     body = _setup_body()
-    m = re.search(
-        r"displaySetupNeeded\s*\(.*?while\s*\(\s*true\s*\)",
-        body, re.DOTALL
-    )
-    assert m, \
-        "setup() does not call displaySetupNeeded() followed by while(true) halt"
+    assert "startProvisioningPortal()" in body, \
+        "setup() does not call startProvisioningPortal() when creds are empty"
 
 
 # ── AC 7: setup() loads NVS creds before WiFi.begin ──────────────────────────
