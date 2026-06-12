@@ -1354,9 +1354,9 @@ void setup() {
 
   // ── UART1 — Grove UART connector (POS RX + Printer TX) ──────────────────────
   // Both directions on the same UART — IO12=RX from POS, IO13=TX to Printer
-  posSerial.begin(9600, SERIAL_8N1, UART1_RX, UART1_TX);
+  posSerial.begin(19200, SERIAL_8N1, UART1_RX, UART1_TX);
   posSerial.setRxBufferSize(4096);
-  Serial.println("[UART1] RX=IO12 TX=IO13 @ 9600");
+  Serial.println("[UART1] RX=IO12 TX=IO13 @ 19200");
 
   // ── I2S audio — NS4168 amp ───────────────────────────────────────────────────
   buzzSetup();
