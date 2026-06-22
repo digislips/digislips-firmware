@@ -521,6 +521,42 @@ void bootProgress(int pct, const char* status) {
   tft.drawString(status, SCREEN_WIDTH / 2, 286);
 }
 
+static bool     g_bootTouchActive = false;
+static unsigned long g_bootTouchStart = 0;
+
+// Replaces delay() during boot — records first touch without blocking stage
+void bootTouchDelay(unsigned long ms) {
+  unsigned long end = millis() + ms;
+  while (millis() < end) {
+    int16_t tx, ty;
+    if (readTouch(tx, ty) && !g_bootTouchActive) {
+      g_bootTouchActive = true;
+      g_bootTouchStart  = millis();
+    }
+    delay(20);
+  }
+}
+
+// Call between stages — if touch was detected, wait for 3 s hold or finger lift
+void bootCheckTouch() {
+  if (!g_bootTouchActive) return;
+  while (true) {
+    int16_t tx, ty;
+    if (readTouch(tx, ty)) {
+      if (millis() - g_bootTouchStart >= 3000) {
+        Serial.println("[Provision] Boot hold — clearing creds, rebooting");
+        credsClear();
+        delay(100);
+        ESP.restart();
+      }
+    } else {
+      g_bootTouchActive = false;
+      return;  // finger lifted before 3 s — resume boot
+    }
+    delay(20);
+  }
+}
+
 void displaySetupNeeded() {
   tft.fillScreen(COL_BG);
   drawHeader(nullptr, 0, 0, 0, false);
@@ -827,6 +863,67 @@ void drawCancelled() {
   tft.drawString("Digital slip claimable 24h.", SCREEN_WIDTH / 2, 272);
 
   drawFooter("Returning to idle...");
+}
+
+// =============================================================================
+//  ── SLIP ERROR SCREEN ────────────────────────────────────────────────────────
+// =============================================================================
+
+void drawSlipError() {
+  tft.fillScreen(COL_BG);
+  drawHeader(nullptr, 0, 0, 0, false);
+
+  int cx = SCREEN_WIDTH / 2;
+  int cy = 152;
+  tft.drawCircle(cx, cy, 40, COL_FAINT);
+  tft.drawCircle(cx, cy, 39, COL_FAINT);
+  tft.drawLine(cx - 17, cy - 17, cx + 17, cy + 17, COL_MUTED);
+  tft.drawLine(cx - 17, cy - 16, cx + 17, cy + 16, COL_MUTED);
+  tft.drawLine(cx + 17, cy - 17, cx - 17, cy + 17, COL_MUTED);
+  tft.drawLine(cx + 17, cy - 16, cx - 17, cy + 16, COL_MUTED);
+
+  tft.setFreeFont(&FreeSansBold9pt7b);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(COL_FG, COL_BG);
+  tft.drawString("Slip not saved", SCREEN_WIDTH / 2, 218);
+
+  tft.setFreeFont(&FreeMono9pt7b);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(COL_MUTED, COL_BG);
+  tft.drawString("Please print a physical slip.", SCREEN_WIDTH / 2, 252);
+
+  drawFooter("Returning to till...");
+}
+
+// =============================================================================
+//  ── UNREGISTERED CARD SCREEN ─────────────────────────────────────────────────
+// =============================================================================
+
+void drawUnregisteredCard() {
+  tft.fillScreen(COL_BG);
+  drawHeader(nullptr, 0, 0, 0, false);
+
+  int cx = SCREEN_WIDTH / 2;
+  int cy = 152;
+  tft.drawCircle(cx, cy, 40, COL_FAINT);
+  tft.drawCircle(cx, cy, 39, COL_FAINT);
+  tft.drawLine(cx - 17, cy - 17, cx + 17, cy + 17, COL_MUTED);
+  tft.drawLine(cx - 17, cy - 16, cx + 17, cy + 16, COL_MUTED);
+  tft.drawLine(cx + 17, cy - 17, cx - 17, cy + 17, COL_MUTED);
+  tft.drawLine(cx + 17, cy - 16, cx - 17, cy + 16, COL_MUTED);
+
+  tft.setFreeFont(&FreeSansBold9pt7b);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(COL_FG, COL_BG);
+  tft.drawString("Card not linked", SCREEN_WIDTH / 2, 218);
+
+  tft.setFreeFont(&FreeMono9pt7b);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(COL_MUTED, COL_BG);
+  tft.drawString("This card is not registered.", SCREEN_WIDTH / 2, 252);
+  tft.drawString("Try a different card.", SCREEN_WIDTH / 2, 272);
+
+  drawFooter("Try again...");
 }
 
 // =============================================================================
@@ -1345,7 +1442,6 @@ void setup() {
   uint32_t nfcVer = nfc.getFirmwareVersion();
   if (!nfcVer) {
     Serial.println("[NFC] PN532 not found — check Grove I2C wiring");
-    displayMessage("NFC Error", "Check Grove I2C", "SDA=IO8 SCL=IO7");
     while (true) delay(100);
   }
   Serial.printf("[NFC] PN532 v%d.%d\n",
@@ -1377,8 +1473,9 @@ void setup() {
   WiFi.begin(creds.wifi_ssid.c_str(), creds.wifi_pass.c_str());
   for (int i = 0; i < 20 && WiFi.status() != WL_CONNECTED; i++) {
     bootProgress(5 + i * 2, "CONNECTING...");
-    delay(500);
+    bootTouchDelay(500);
   }
+  bootCheckTouch();
 
   if (WiFi.status() == WL_CONNECTED) {
     Serial.println("[WiFi] Connected: " + WiFi.localIP().toString());
@@ -1389,9 +1486,10 @@ void setup() {
     time_t now = 0;
     for (int i = 0; i < 20 && now < 100000; i++) {
       bootProgress(45 + i * 2, "SYNCING TIME...");
-      delay(500);
+      bootTouchDelay(500);
       time(&now);
     }
+    bootCheckTouch();
     if (now > 100000) {
       Serial.println("[NTP] Synced");
       bootProgress(90, "TIME SYNCED");
@@ -1401,7 +1499,6 @@ void setup() {
     }
     bootProgress(92, "IDENTIFYING...");
     if (!fetchDeviceIdentity(g_deviceToken)) {
-      displayMessage("Identity error", "Check device token", "in Supabase");
       while (true) delay(100);
     }
     bootProgress(98, "IDENTIFIED");
@@ -1412,9 +1509,10 @@ void setup() {
 
   bootProgress(100, "READY");
 
-  // Hold boot screen for at least 4 s so user can see it
+  // Hold boot screen for at least 4 s; touch held 3 s anywhere during boot triggers reprovision
   long remaining = 4000 - (long)(millis() - bootStart);
-  if (remaining > 0) delay((unsigned long)remaining);
+  if (remaining > 0) bootTouchDelay((unsigned long)remaining);
+  bootCheckTouch();
 
   // ── Ready ───────────────────────────────────────────────────────────────────
   buzz(BUZZ_SHORT_MS);
@@ -1439,23 +1537,6 @@ void loop() {
     case STATE_IDLE:
       {
         displayIdle();
-
-        // 5-second touch hold → clear creds and reboot into portal
-        {
-          static unsigned long touchHoldStart = 0;
-          int16_t tx, ty;
-          if (readTouch(tx, ty)) {
-            if (touchHoldStart == 0) touchHoldStart = millis();
-            if (millis() - touchHoldStart >= 5000) {
-              Serial.println("[Provision] 5s hold — clearing creds, rebooting");
-              credsClear();
-              delay(100);
-              ESP.restart();
-            }
-          } else {
-            touchHoldStart = 0;
-          }
-        }
 
         if (posSerial.available()) {
           printBufferLen = 0;
@@ -1533,9 +1614,10 @@ void loop() {
 
           } else {
             Serial.println("[Supabase] POST failed — printing immediately");
-            currentState = STATE_WAITING_CLAIM;
-            claimWindowStart = millis();
-            displayMessage("Upload failed", "Tap Print for paper");
+            drawSlipError();
+            delay(5000);
+            currentState = STATE_IDLE;
+            lastIdleRefresh = 0;
           }
         } else {
           Serial.println("[Offline] No WiFi — printing immediately");
@@ -1606,6 +1688,12 @@ void loop() {
             bool ok = supabaseNfcClaim(slipId, nfcUID);
             Serial.println(ok ? "[NFC] Slip claimed via NFC card"
                               : "[NFC] nfc-claim failed — slip not linked to user");
+            if (!ok) {
+              drawUnregisteredCard();
+              delay(2000);
+              drawQR(slipId.c_str());
+              break;
+            }
           }
 
           claimMethod = CLAIM_NFC;
