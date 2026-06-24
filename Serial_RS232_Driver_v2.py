@@ -675,6 +675,53 @@ def slip_7_logo_test(port: str = SERIAL_PORT, baud: int = BAUD_RATE) -> None:
     )
 
 
+def slip_8_combined_test(port: str = SERIAL_PORT, baud: int = BAUD_RATE) -> None:
+    now = datetime.now().strftime("%d/%m/%Y  %H:%M:%S")
+    logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_logo.png")
+    (
+        Receipt()
+        .center()
+        .logo(logo_path)
+        .blank()
+        .size("big").bold().line("CITY FRESH").bold(False).size()
+        .line("Shop 3, Greenpoint Market")
+        .line("Main Road, Cape Town, 8005")
+        .line("Tel: +27 21 439 7700")
+        .line("VAT Reg: 4320876543")
+        .divider("=")
+        .left()
+        .row("Date/Time:", now)
+        .row("Cashier:", "Lerato M.  [LM01]")
+        .row("Till:", "#1  |  Trans: 00012345")
+        .divider()
+        .bold().line("QTY  DESCRIPTION            PRICE").bold(False)
+        .divider()
+        .row("2x  Organic Eggs 12pk", "R  89.98")
+        .row("1x  Sourdough Bread 800g", "R  62.99")
+        .row("1x  Almond Butter 400g", "R  99.99")
+        .row("3x  Sparkling Water 750ml", "R  44.97")
+        .divider("=")
+        .row("Subtotal:", "R  297.93")
+        .row("VAT @ 15% (incl.):", "R   38.86")
+        .divider()
+        .bold().size("wide").row("TOTAL:", "R  297.93").size().bold(False)
+        .divider("=")
+        .bold().line("PAYMENT").bold(False)
+        .row("Tap-to-Pay Visa:", "R  297.93")
+        .divider("=")
+        .center()
+        .bold().line("CITY FRESH REWARDS").bold(False)
+        .line("Scan your card to earn points")
+        .blank()
+        .barcode("9782504938271")
+        .blank()
+        .line("Thank you for shopping fresh!")
+        .line("cityfresh.co.za")
+        .feed(4).cut()
+        .print(port=port, baud=baud)
+    )
+
+
 # ── Slip registry ──────────────────────────────────────────────────────────────
 SLIPS = {
     "1": {
@@ -711,6 +758,11 @@ SLIPS = {
         "fn":   slip_7_logo_test,
         "name": "Retail Slip + Store Logo (GS v 0 bitmap)",
         "size": "LOGO     ~0.7 m",
+    },
+    "8": {
+        "fn":   slip_8_combined_test,
+        "name": "Combined: Logo + Barcode (buffer stress test)",
+        "size": "COMBINED ~0.8 m",
     },
     "0": {
         "fn":   print_test_page,
