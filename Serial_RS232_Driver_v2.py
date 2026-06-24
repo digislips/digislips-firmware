@@ -1,3 +1,4 @@
+import os
 import serial
 import serial.tools.list_ports
 import time
@@ -229,6 +230,39 @@ class Receipt:
     def row(self, label: str, value: str) -> "Receipt":
         gap = max(1, self._width - len(label) - len(value))
         return self.line(label + " " * gap + value)
+
+    # ── Logo ──────────────────────────────────────────────────────────────────
+    def logo(self, path: str) -> "Receipt":
+        """Load a PNG, scale to 384px wide, and emit GS v 0 raster bitmap bytes."""
+        import math
+        from PIL import Image
+
+        img = Image.open(path).convert("L")
+        orig_w, orig_h = img.size
+        target_width = 384
+        new_h = max(1, round(orig_h * target_width / orig_w))
+        img = img.resize((target_width, new_h), Image.LANCZOS)
+
+        width, height = img.size
+        bytes_per_row = math.ceil(width / 8)
+
+        xL = bytes_per_row & 0xFF
+        xH = (bytes_per_row >> 8) & 0xFF
+        yL = height & 0xFF
+        yH = (height >> 8) & 0xFF
+
+        # GS v 0  m=0 (normal density)  xL xH yL yH  data
+        self._buf += GS + b'\x76\x30\x00' + bytes([xL, xH, yL, yH])
+
+        pixels = img.load()
+        for y in range(height):
+            row = bytearray(bytes_per_row)
+            for x in range(width):
+                if pixels[x, y] < 128:        # dark pixel → print dot
+                    row[x // 8] |= (0x80 >> (x % 8))
+            self._buf += bytes(row)
+
+        return self
 
     # ── Barcode ───────────────────────────────────────────────────────────────
     def barcode(self, value: str, barcode_type: str = "CODE128") -> "Receipt":
@@ -599,6 +633,48 @@ def slip_6_barcode_test(port: str = SERIAL_PORT, baud: int = BAUD_RATE) -> None:
     )
 
 
+def slip_7_logo_test(port: str = SERIAL_PORT, baud: int = BAUD_RATE) -> None:
+    now = datetime.now().strftime("%d/%m/%Y  %H:%M:%S")
+    logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_logo.png")
+    (
+        Receipt()
+        .center()
+        .logo(logo_path)
+        .blank()
+        .size("big").bold().line("CITY FRESH").bold(False).size()
+        .line("Shop 3, Greenpoint Market")
+        .line("Main Road, Cape Town, 8005")
+        .line("Tel: +27 21 439 7700")
+        .line("VAT Reg: 4320876543")
+        .divider("=")
+        .left()
+        .row("Date/Time:", now)
+        .row("Cashier:", "Lerato M.  [LM01]")
+        .row("Till:", "#1  |  Trans: 00012345")
+        .divider()
+        .bold().line("QTY  DESCRIPTION            PRICE").bold(False)
+        .divider()
+        .row("2x  Organic Eggs 12pk", "R  89.98")
+        .row("1x  Sourdough Bread 800g", "R  62.99")
+        .row("1x  Almond Butter 400g", "R  99.99")
+        .row("3x  Sparkling Water 750ml", "R  44.97")
+        .divider("=")
+        .row("Subtotal:", "R  297.93")
+        .row("VAT @ 15% (incl.):", "R   38.86")
+        .divider()
+        .bold().size("wide").row("TOTAL:", "R  297.93").size().bold(False)
+        .divider("=")
+        .bold().line("PAYMENT").bold(False)
+        .row("Tap-to-Pay Visa:", "R  297.93")
+        .divider("=")
+        .center()
+        .line("Thank you for shopping fresh!")
+        .line("cityfresh.co.za")
+        .feed(4).cut()
+        .print(port=port, baud=baud)
+    )
+
+
 # ── Slip registry ──────────────────────────────────────────────────────────────
 SLIPS = {
     "1": {
@@ -630,6 +706,11 @@ SLIPS = {
         "fn":   slip_6_barcode_test,
         "name": "Retail Slip + Code128 Loyalty Barcode",
         "size": "BARCODE  ~0.6 m",
+    },
+    "7": {
+        "fn":   slip_7_logo_test,
+        "name": "Retail Slip + Store Logo (GS v 0 bitmap)",
+        "size": "LOGO     ~0.7 m",
     },
     "0": {
         "fn":   print_test_page,
@@ -687,7 +768,7 @@ def run_menu(port: str = SERIAL_PORT, baud: int = BAUD_RATE) -> None:
             info["fn"](port=port, baud=baud)
 
         else:
-            print("[!] Invalid choice. Please enter 0–6, A, D, P, or Q.")
+            print("[!] Invalid choice. Please enter 0–7, A, D, P, or Q.")
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
