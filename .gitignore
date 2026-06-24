@@ -11,8 +11,13 @@ __pycache__/
 # Old hardware — not in active development
 DigiSlip_ESP32/
 
+CH341T_setup_notes.md
+
 # Internal — not for public repo
 CLAUDE.md
 CONTEXT.md
 docs/
 supabase/
+port_configs.md
+digislips_configs_all.html
+digislips_configs_all.pdf
