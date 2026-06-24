@@ -50,6 +50,7 @@
 #include <QRCodeGenerator.h>
 #include <ArduinoJson.h>
 #include <Preferences.h>
+#include <mbedtls/base64.h>
 #include <time.h>
 #include "driver/i2s.h"
 #include "wordmark_38.h"
@@ -1123,10 +1124,24 @@ String buildSupabaseJSON(const String& timestamp, const String& uuid) {
   rawText.replace("\\", "\\\\");
   rawText.replace("\"", "\\\"");
 
-  DynamicJsonDocument doc(4096);
+  // Base64-encode the raw ESC/POS buffer for backend barcode/logo parsing
+  size_t encodedLen = 0;
+  mbedtls_base64_encode(nullptr, 0, &encodedLen, printBuffer, printBufferLen);
+  String rawEscpos;
+  rawEscpos.reserve(encodedLen + 1);
+  unsigned char* encodedBuf = (unsigned char*)malloc(encodedLen + 1);
+  if (encodedBuf) {
+    mbedtls_base64_encode(encodedBuf, encodedLen + 1, &encodedLen, printBuffer, printBufferLen);
+    encodedBuf[encodedLen] = '\0';
+    rawEscpos = String((char*)encodedBuf);
+    free(encodedBuf);
+  }
+
+  DynamicJsonDocument doc(16384);
   doc["id"] = uuid;
   doc["raw_text"] = rawText;
   doc["created_at"] = timestamp;
+  doc["raw_escpos"] = rawEscpos;
 
   String output;
   serializeJson(doc, output);
