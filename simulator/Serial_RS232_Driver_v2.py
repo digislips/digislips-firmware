@@ -107,11 +107,14 @@ def print_raw_serial(
         ser = get_connection(port, baud)
 
         # CH340 TX FIFO is ~32 bytes — chunk with inter-chunk delay.
+        # flush() after each write blocks until the OS driver has physically
+        # transmitted the chunk; without it, Windows batches all writes into a
+        # continuous stream that can overflow the printer's bitmap receive buffer.
         chunk_delay = 32 / baud * 10 * 1.5
         for i in range(0, len(data), 32):
             ser.write(data[i:i + 32])
+            ser.flush()
             time.sleep(chunk_delay)
-        ser.flush()
         print(f"[OK] Sent {len(data)} bytes to {port} @ {baud} baud")
 
     except serial.SerialException as e:
