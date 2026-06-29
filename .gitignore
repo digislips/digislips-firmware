@@ -13,6 +13,9 @@ DigiSlip_ESP32/
 
 CH341T_setup_notes.md
 
+# Per-device secrets — never commit
+DigiSlip_ONX3248G035/config.h
+
 # Internal — not for public repo
 CLAUDE.md
 CONTEXT.md
