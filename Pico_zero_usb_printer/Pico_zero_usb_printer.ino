@@ -29,7 +29,7 @@
 class USBVendorPrinter : public Adafruit_USBD_Interface {
 public:
   USBVendorPrinter() {
-    setStringDescriptor("DigiSlips USB Bridge (test)");
+    setStringDescriptor("DigiSlips POS Adapter");
   }
 
   uint16_t getInterfaceDescriptor(uint8_t itfnum_deprecated, uint8_t* buf, uint16_t bufsize) override {
@@ -142,7 +142,7 @@ void printHexDump(const uint8_t* buf, size_t len) {
 void setup() {
   TinyUSBDevice.setID(0x1FC9, 0x2016);  // mirror the real printer's VID/PID
   TinyUSBDevice.setManufacturerDescriptor("DigiSlips");
-  TinyUSBDevice.setProductDescriptor("DigiSlips USB Bridge (test)");
+  TinyUSBDevice.setProductDescriptor("DigiSlips POS Adapter");
 
   TinyUSBDevice.addInterface(usbVendor);
 
@@ -167,7 +167,7 @@ void setup() {
   Serial.begin(115200);
   while (!Serial) { ; }
   Serial.println();
-  Serial.println("[SYS] RP2040-Zero USB printer bridge test ready");
+  Serial.println("[SYS] DigiSlips POS Adapter ready");
   Serial.println("[SYS] Vendor class FFh, VID 0x1FC9 PID 0x2016 -- point USB_Only_Driver.py at me");
 }
 
