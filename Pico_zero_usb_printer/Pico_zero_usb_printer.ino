@@ -9,12 +9,13 @@
 // CDC (Serial) carries debug output to the Arduino IDE / arduino-cli Serial
 // Monitor -- same physical USB connection as the vendor bulk pipe.
 //
-// This is the isolated first milestone of the production USB printer-bridge
-// board: POS --USB--> [this board] --UART--> ESP32-S3 main board. The UART
-// forwarding to the main board is a separate follow-up step; for now this
-// just proves the USB enumeration + bulk-OUT capture works, using the same
-// ESC/POS byte-stripping logic as DigiSlip_ONX3248G035.ino's parseESCPOS()
-// so the debug output is directly comparable to what the ESP32 already logs.
+// POS --USB--> [this board] --UART--> ESP32-S3 main board. Captured USB
+// bytes stream out UART0 (GP28 TX) to the ESP32-S3's existing posSerial RX
+// pin (IO12) as they arrive, at the same 19200 baud/8N1 framing -- the ESP32
+// needs no firmware changes, it already buffers and parses on that pin. The
+// CDC debug print (hex dump + parseESCPOS(), ported from
+// DigiSlip_ONX3248G035.ino) stays as a passive tap, silence-gated, so its
+// output is directly comparable to what the ESP32 already logs.
 //
 // Build: must be compiled with the CFG_TUSB_CONFIG_FILE override in this
 // folder (tusb_config_override.h) -- see build.ps1. The Arduino IDE alone
@@ -153,6 +154,16 @@ void setup() {
     TinyUSBDevice.attach();
   }
 
+  // UART0 -> ESP32-S3 IO12 (posSerial RX). Simplex: only TX is wired.
+  // FIFO sized to hold one full job so write() never blocks mid-transfer
+  // waiting for the 19200-baud link to drain (~4s for a full 8KB buffer) --
+  // the interrupt-driven UART drains it in the background while loop()
+  // keeps servicing tud_task().
+  Serial1.setTX(28);
+  Serial1.setRX(29);
+  Serial1.setFIFOSize(RX_BUFFER_SIZE);
+  Serial1.begin(19200, SERIAL_8N1);
+
   Serial.begin(115200);
   while (!Serial) { ; }
   Serial.println();
@@ -163,6 +174,7 @@ void setup() {
 void loop() {
   while (tud_vendor_available() && rxLen < RX_BUFFER_SIZE) {
     uint32_t chunk = tud_vendor_read(rxBuffer + rxLen, RX_BUFFER_SIZE - rxLen);
+    Serial1.write(rxBuffer + rxLen, chunk);
     rxLen += chunk;
     lastByteTime = millis();
   }

@@ -1,17 +1,17 @@
 # USB printer-bridge handoff — RP2040-Zero POS-facing firmware
 
 **Last updated:** 2026-07-13
-**Status:** POS-facing bridge board firmware **hardware-confirmed working** at its current scope (standalone USB enumeration + bulk-OUT capture). ESP32-S3 UART integration **not started**.
+**Status:** POS-facing bridge board firmware **hardware-confirmed working**, including the ESP32-S3 UART link. Full pipeline POS(sim)→RP2040→ESP32→Supabase→QR **confirmed on real hardware**. Only the printer-facing leg (ESP32-S3→USB host→real printer) remains undesigned.
 
 ---
 
 ## TL;DR
 
-The RP2040-Zero ("Pico Zero") now runs firmware that enumerates as a composite USB device — a CDC serial port (for debug output) plus a vendor-class (FFh) bulk endpoint that exactly mirrors the real thermal printer's USB identity (VID `0x1FC9` / PID `0x2016`). `simulator/USB_Only_Driver.py`, pointed at the board instead of the real printer, successfully sent a 206-byte ESC/POS test receipt; the board buffered it, stripped the ESC/GS control codes, and printed the extracted text lines to the Serial Monitor — proving the whole POS→bridge-board pipe works.
+The RP2040-Zero ("Pico Zero") runs firmware that enumerates as a composite USB device — a CDC serial port (for debug output) plus a vendor-class (FFh) bulk endpoint that exactly mirrors the real thermal printer's USB identity (VID `0x1FC9` / PID `0x2016`). `simulator/USB_Only_Driver.py`, pointed at the board instead of the real printer, sends ESC/POS bytes which the board now **streams live over UART0 (GP28) to the ESP32-S3 main board's existing `posSerial` RX pin (IO12)** — no ESP32 firmware changes needed. Confirmed end-to-end 2026-07-13: a test receipt flowed POS(sim)→RP2040→UART→ESP32→`parseESCPOS()`→Supabase upload→QR code, and the resulting QR was scanned successfully on a phone. Full design + implementation details in memory `project_esp32_uart_bridge_link_design`.
 
 **Two real toolchain/OS problems were hit and solved** (not obvious, worth reading before repeating this on a second board): the Arduino IDE cannot build this firmware at all (needs `arduino-cli` + a specific build flag), and reusing the real printer's VID/PID broke Windows driver binding until Zadig was re-run per-interface. Both are detailed below.
 
-**Not yet done:** forwarding the captured bytes over UART to the ESP32-S3 main board. That's the next milestone and needs its own design pass (which GPIOs, what data path) — see "Next steps."
+**Not yet done:** the printer-facing leg — ESP32-S3 acting as USB host to drive a real physical printer. Still undesigned (FeatherWing/MAX3421E vs. second RP2040 as TinyUSB host) — see "Next steps."
 
 ---
 
@@ -154,12 +154,9 @@ Every line matches `print_test_page()`'s content exactly. This confirms: USB enu
 
 ## Next steps (not started)
 
-1. **UART link from this board to the ESP32-S3 main board**, forwarding the captured bulk-OUT bytes instead of (or in addition to) the local debug print. Needs its own design pass — this is a new decision tree, not a continuation of the ones already closed:
-   - Which ESP32-S3 GPIOs to dedicate (camera FPC header `J8` pins IO17/18/21/38/39/40/41/42/45/46/47/48 were the leading unused candidates as of the original architecture discussion, not finalized).
-   - Which RP2040-Zero GPIOs for that UART (default UART0 is TX=GP0/RX=GP1 if going that route).
-   - Whether the ESP32-S3 side needs new firmware changes, and how much of `DigiSlip_ONX3248G035.ino`'s existing `posSerial`-based state machine can be reused as-is vs needs a second UART input path.
-2. **Printer-facing side of the chain** (ESP32-S3 → USB host → real printer) — still undecided between the Adafruit USB Host FeatherWing (SPI, MAX3421E) and a second RP2040 board running TinyUSB host stack. Not touched this session.
-3. Per project convention ([[feedback_grill_before_implement]] / [[feedback_test_before_moving_on]] in memory) — **do not start step 1 without an explicit go-ahead and its own grilling session.** This document exists so that session can start with full context instead of re-deriving it.
+1. ~~UART link from this board to the ESP32-S3 main board~~ — **done, hardware-confirmed 2026-07-13.** GP28 (RP2040 UART0 TX) → IO12 (ESP32 `posSerial` RX), 19200 baud, streaming forward, zero ESP32 firmware changes. Full design/implementation details in memory `project_esp32_uart_bridge_link_design`.
+2. **Printer-facing side of the chain** (ESP32-S3 → USB host → real printer) — still undecided between the Adafruit USB Host FeatherWing (SPI, MAX3421E) and a second RP2040 board running TinyUSB host stack. Not touched yet. This is the only remaining gap in the full POS→bridge→ESP32→printer chain.
+3. Per project convention ([[feedback_grill_before_implement]] / [[feedback_test_before_moving_on]] in memory) — **do not start step 2 without an explicit go-ahead and its own grilling session.** This document exists so that session can start with full context instead of re-deriving it.
 
 ---
 
