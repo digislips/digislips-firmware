@@ -5,6 +5,7 @@ from dataclasses import dataclass
 class Product:
     name: str
     price: float
+    category: str = ""
 
 
 @dataclass

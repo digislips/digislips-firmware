@@ -1,4 +1,5 @@
 import ctypes
+import random
 import sys
 
 import pytest
@@ -22,6 +23,7 @@ def app(shared_app):
     shared_app.clear_button.cget("command")()
     shared_app.transport_toggle.set("Serial")
     shared_app._on_transport_changed("Serial")
+    shared_app.close_settings()
     return shared_app
 
 
@@ -43,6 +45,12 @@ def test_catalog_renders_a_button_per_product(app):
     assert 12 <= len(CATALOG) <= 16
     assert len(app.product_buttons) == len(CATALOG)
     assert set(app.product_buttons.keys()) == {p.name for p in CATALOG}
+
+
+def test_catalog_fills_the_grid_with_no_empty_gaps(app):
+    # 4 columns; a partially filled last row is the "cheap prototype" look this
+    # till is meant to avoid.
+    assert len(CATALOG) % 4 == 0
 
 
 def test_tapping_a_product_button_adds_it_to_the_cart(app):
@@ -100,6 +108,30 @@ def test_clear_cart_control_empties_the_basket(app):
     assert app.cart_line_widgets == {}
 
 
+def test_random_button_fills_the_basket_with_ten_distinct_items(app):
+    app.random_button.cget("command")()
+
+    lines = app.cart.lines()
+    assert len(lines) == 10
+    assert all(line.qty == 1 for line in lines)
+    assert len({line.name for line in lines}) == 10
+    catalog_names = {p.name for p in CATALOG}
+    assert {line.name for line in lines} <= catalog_names
+
+
+def test_random_button_replaces_the_existing_basket_rather_than_appending(app, monkeypatch):
+    app.product_buttons[CATALOG[0].name].cget("command")()
+    app.product_buttons[CATALOG[0].name].cget("command")()  # qty 2, to prove it doesn't linger
+
+    monkeypatch.setattr(random, "sample", lambda population, k: list(population)[:k])
+    app.random_button.cget("command")()
+
+    lines = app.cart.lines()
+    assert len(lines) == 10
+    first_line = next(line for line in lines if line.name == CATALOG[0].name)
+    assert first_line.qty == 1  # the earlier qty-2 tap was cleared, not carried over
+
+
 def test_totals_labels_update_live_as_cart_changes(app):
     app.product_buttons[CATALOG[0].name].cget("command")()
     app.product_buttons[CATALOG[1].name].cget("command")()
@@ -120,14 +152,32 @@ def test_include_logo_and_barcode_checkboxes_are_present_and_default_on(app):
     assert app.include_barcode_checkbox.get() == 1
 
 
+def test_transport_controls_are_hidden_until_settings_is_opened(app):
+    # Buyers see this screen during demos; COM ports and baud rates stay out of sight.
+    assert not app.serial_controls_frame.winfo_ismapped()
+    assert not app.usb_controls_frame.winfo_ismapped()
+
+
 def test_transport_toggle_defaults_to_serial_and_shows_serial_controls(app):
+    app.open_settings()
+
     assert app.transport_toggle.get() == "Serial"
     assert app.serial_controls_frame.winfo_ismapped()
     assert not app.usb_controls_frame.winfo_ismapped()
 
 
+def test_settings_can_be_toggled_shut_again(app):
+    app.open_settings()
+    assert app.serial_controls_frame.winfo_ismapped()
+
+    app.toggle_settings()
+
+    assert not app.serial_controls_frame.winfo_ismapped()
+
+
 def test_switching_to_usb_shows_usb_controls_and_live_connection_status(app, monkeypatch):
     monkeypatch.setattr(transport, "usb_is_connected", lambda: True)
+    app.open_settings()
 
     app.transport_toggle.set("USB")
     app._on_transport_changed("USB")

@@ -7,6 +7,11 @@ __pycache__/
 *.pyc
 *.pyo
 *.ttf
+# ...except the till's bundled brand fonts, which the simulator loads at runtime.
+!simulator/assets/fonts/*.ttf
+
+# Runtime log written by the desktop launcher, not a build artifact to track
+simulator/launch_error.log
 
 # Old hardware — not in active development
 DigiSlip_ESP32/
