@@ -153,6 +153,47 @@ class Receipt:
         gap = max(1, self._width - len(label) - len(value))
         return self.line(label + " " * gap + value)
 
+    def logo(self, path: str) -> "Receipt":
+        """Load a PNG, scale to 384px wide, and emit GS v 0 raster bitmap bytes."""
+        import math
+        from PIL import Image
+
+        img = Image.open(path).convert("L")
+        orig_w, orig_h = img.size
+        target_width = 384
+        new_h = max(1, round(orig_h * target_width / orig_w))
+        img = img.resize((target_width, new_h), Image.LANCZOS)
+
+        width, height = img.size
+        bytes_per_row = math.ceil(width / 8)
+
+        xL = bytes_per_row & 0xFF
+        xH = (bytes_per_row >> 8) & 0xFF
+        yL = height & 0xFF
+        yH = (height >> 8) & 0xFF
+
+        # GS v 0  m=0 (normal density)  xL xH yL yH  data
+        self._buf += GS + b'\x76\x30\x00' + bytes([xL, xH, yL, yH])
+
+        pixels = img.load()
+        for y in range(height):
+            row = bytearray(bytes_per_row)
+            for x in range(width):
+                if pixels[x, y] < 128:        # dark pixel → print dot
+                    row[x // 8] |= (0x80 >> (x % 8))
+            self._buf += bytes(row)
+
+        return self
+
+    def barcode(self, value: str, barcode_type: str = "CODE128") -> "Receipt":
+        self._buf += GS + b'\x48\x02'          # GS H 2 — HRI below
+        self._buf += GS + b'\x68\x50'          # GS h 80 — height 80 dots
+        self._buf += GS + b'\x77\x02'          # GS w 2 — module width narrow
+        data = "{B" + value
+        self._buf += GS + b'k' + bytes([73, len(data)]) + data.encode("ascii")
+        self._buf += FEED_LINE
+        return self
+
     def cut(self, partial: bool = False) -> "Receipt":
         self._buf += CUT_PARTIAL if partial else CUT_FULL
         return self
