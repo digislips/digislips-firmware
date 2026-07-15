@@ -18,4 +18,5 @@ def build_receipt(cart: Cart, receipt_cls, *, include_logo: bool = False, includ
     r.row("Tap-to-Pay Visa:", f"R  {cart.total():.2f}")
     if include_barcode:
         r.barcode(LOYALTY_BARCODE)
+    r.feed(4).cut()
     return r.build()

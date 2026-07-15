@@ -2,7 +2,11 @@ import sys
 
 import customtkinter as ctk
 
+import Serial_RS232_Driver_v2 as serial_driver
+import USB_Only_Driver as usb_driver
+import transport
 from cart import Cart, Product
+from receipt_builder import build_receipt
 
 if sys.platform.startswith("win"):
     # customtkinter also requests per-monitor DPI awareness, but only once its
@@ -13,6 +17,8 @@ if sys.platform.startswith("win"):
     import ctypes
 
     ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PROCESS_PER_MONITOR_DPI_AWARE
+
+BAUD_RATES: list[str] = ["1200", "2400", "4800", "9600", "19200", "38400", "57600", "115200"]
 
 CATALOG: list[Product] = [
     Product("Avocado Ready-to-Eat", 12.99),
@@ -44,6 +50,7 @@ class PosApp(ctk.CTk):
 
         self._build_catalog()
         self._build_cart_panel()
+        self._build_print_controls()
 
     def _build_catalog(self):
         catalog_frame = ctk.CTkFrame(self)
@@ -134,6 +141,92 @@ class PosApp(ctk.CTk):
         self.subtotal_label.configure(text=f"Subtotal: R {self.cart.subtotal():.2f}")
         self.vat_label.configure(text=f"VAT @ 15% (incl.): R {self.cart.vat():.2f}")
         self.total_label.configure(text=f"TOTAL: R {self.cart.total():.2f}")
+
+    def _build_print_controls(self):
+        self.print_frame = ctk.CTkFrame(self.cart_frame)
+        self.print_frame.pack(fill="x")
+
+        self.include_logo_checkbox = ctk.CTkCheckBox(self.print_frame, text="Include logo")
+        self.include_logo_checkbox.select()
+        self.include_logo_checkbox.pack(fill="x")
+
+        self.include_barcode_checkbox = ctk.CTkCheckBox(self.print_frame, text="Include barcode")
+        self.include_barcode_checkbox.select()
+        self.include_barcode_checkbox.pack(fill="x")
+
+        self.transport_toggle = ctk.CTkSegmentedButton(
+            self.print_frame, values=["Serial", "USB"], command=self._on_transport_changed
+        )
+        self.transport_toggle.set("Serial")
+        self.transport_toggle.pack(fill="x")
+
+        self.serial_controls_frame = ctk.CTkFrame(self.print_frame)
+
+        self.port_combo = ctk.CTkComboBox(self.serial_controls_frame, values=[])
+        self.port_combo.set(serial_driver.SERIAL_PORT)
+        self.port_combo.pack(fill="x")
+
+        self.baud_combo = ctk.CTkComboBox(self.serial_controls_frame, values=BAUD_RATES)
+        self.baud_combo.set(str(serial_driver.BAUD_RATE))
+        self.baud_combo.pack(fill="x")
+
+        self.scan_ports_button = ctk.CTkButton(
+            self.serial_controls_frame, text="Scan ports", command=self._scan_ports
+        )
+        self.scan_ports_button.pack(fill="x")
+
+        self.usb_controls_frame = ctk.CTkFrame(self.print_frame)
+        self.usb_status_label = ctk.CTkLabel(self.usb_controls_frame, text="")
+        self.usb_status_label.pack(fill="x")
+
+        self._on_transport_changed("Serial")
+
+        self.print_button = ctk.CTkButton(self.print_frame, text="Print", command=self._on_print)
+        self.print_button.pack(fill="x")
+
+        self.feedback_label = ctk.CTkLabel(self.print_frame, text="")
+        self.feedback_label.pack(fill="x")
+
+    def _on_print(self):
+        is_serial = self.transport_toggle.get() == "Serial"
+        chosen_transport = transport.Transport.SERIAL if is_serial else transport.Transport.USB
+        receipt_cls = serial_driver.Receipt if is_serial else usb_driver.Receipt
+
+        data = build_receipt(
+            self.cart,
+            receipt_cls,
+            include_logo=bool(self.include_logo_checkbox.get()),
+            include_barcode=bool(self.include_barcode_checkbox.get()),
+        )
+
+        try:
+            transport.send(data, chosen_transport, port=self.port_combo.get(), baud=int(self.baud_combo.get()))
+        except transport.TransportError as e:
+            self.feedback_label.configure(text=f"Print failed: {e}")
+            return
+
+        self.feedback_label.configure(text="Print success")
+        self._clear_cart()
+
+    def _on_transport_changed(self, selected: str):
+        if selected == "Serial":
+            self.usb_controls_frame.pack_forget()
+            self.serial_controls_frame.pack(fill="x")
+        else:
+            self.serial_controls_frame.pack_forget()
+            self.usb_controls_frame.pack(fill="x")
+            self._refresh_usb_status()
+
+    def _refresh_usb_status(self):
+        connected = transport.usb_is_connected()
+        text = "Printer detected" if connected else "Printer not detected"
+        self.usb_status_label.configure(text=text)
+
+    def _scan_ports(self):
+        ports = transport.scan_serial_ports()
+        self.port_combo.configure(values=ports)
+        if ports:
+            self.port_combo.set(ports[0])
 
 
 if __name__ == "__main__":

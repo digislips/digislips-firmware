@@ -3,7 +3,11 @@ import sys
 
 import pytest
 
+import Serial_RS232_Driver_v2 as serial_driver
+import USB_Only_Driver as usb_driver
+import transport
 from pos_gui import PosApp, CATALOG
+from receipt_builder import build_receipt
 
 
 @pytest.fixture(scope="module")
@@ -16,6 +20,8 @@ def shared_app():
 @pytest.fixture
 def app(shared_app):
     shared_app.clear_button.cget("command")()
+    shared_app.transport_toggle.set("Serial")
+    shared_app._on_transport_changed("Serial")
     return shared_app
 
 
@@ -107,3 +113,135 @@ def test_totals_labels_update_live_as_cart_changes(app):
     assert f"{app.cart.subtotal():.2f}" in app.subtotal_label.cget("text")
     assert f"{app.cart.vat():.2f}" in app.vat_label.cget("text")
     assert f"{app.cart.total():.2f}" in app.total_label.cget("text")
+
+
+def test_include_logo_and_barcode_checkboxes_are_present_and_default_on(app):
+    assert app.include_logo_checkbox.get() == 1
+    assert app.include_barcode_checkbox.get() == 1
+
+
+def test_transport_toggle_defaults_to_serial_and_shows_serial_controls(app):
+    assert app.transport_toggle.get() == "Serial"
+    assert app.serial_controls_frame.winfo_ismapped()
+    assert not app.usb_controls_frame.winfo_ismapped()
+
+
+def test_switching_to_usb_shows_usb_controls_and_live_connection_status(app, monkeypatch):
+    monkeypatch.setattr(transport, "usb_is_connected", lambda: True)
+
+    app.transport_toggle.set("USB")
+    app._on_transport_changed("USB")
+    app.update_idletasks()
+
+    assert app.usb_controls_frame.winfo_ismapped()
+    assert not app.serial_controls_frame.winfo_ismapped()
+    assert "detected" in app.usb_status_label.cget("text").lower()
+
+
+def test_switching_to_usb_shows_not_detected_when_no_device_found(app, monkeypatch):
+    monkeypatch.setattr(transport, "usb_is_connected", lambda: False)
+
+    app.transport_toggle.set("USB")
+    app._on_transport_changed("USB")
+
+    assert "not detected" in app.usb_status_label.cget("text").lower()
+
+
+def test_serial_controls_have_editable_port_and_baud_combo_defaults(app):
+    assert app.port_combo.get() != ""
+    assert app.baud_combo.get() != ""
+
+
+def test_baud_combo_is_prepopulated_with_common_baud_rates(app):
+    values = app.baud_combo.cget("values")
+    assert str(serial_driver.BAUD_RATE) in values
+    assert "9600" in values
+    assert "115200" in values
+
+
+def test_scan_ports_button_populates_the_port_combo_and_selects_the_first_found_port(app, monkeypatch):
+    monkeypatch.setattr(transport, "scan_serial_ports", lambda: ["COM3", "COM9"])
+
+    app.scan_ports_button.cget("command")()
+
+    assert app.port_combo.cget("values") == ["COM3", "COM9"]
+    assert app.port_combo.get() == "COM3"
+
+
+def test_print_over_serial_sends_receipt_shows_success_and_clears_cart(app, monkeypatch):
+    sent = {}
+
+    def fake_send(data, chosen_transport, port=None, baud=None):
+        sent["data"] = data
+        sent["transport"] = chosen_transport
+        sent["port"] = port
+        sent["baud"] = baud
+
+    monkeypatch.setattr(transport, "send", fake_send)
+
+    app.product_buttons[CATALOG[0].name].cget("command")()
+    expected = build_receipt(app.cart, serial_driver.Receipt, include_logo=True, include_barcode=True)
+
+    app.print_button.cget("command")()
+
+    assert sent["data"] == expected
+    assert sent["transport"] is transport.Transport.SERIAL
+    assert sent["port"] == app.port_combo.get()
+    assert sent["baud"] == int(app.baud_combo.get())
+    assert "success" in app.feedback_label.cget("text").lower()
+    assert app.cart.lines() == []
+
+
+def test_unchecked_toggles_are_omitted_from_the_printed_receipt(app, monkeypatch):
+    sent = {}
+    monkeypatch.setattr(transport, "send", lambda data, t, port=None, baud=None: sent.update(data=data))
+
+    app.include_logo_checkbox.deselect()
+    app.include_barcode_checkbox.deselect()
+    app.product_buttons[CATALOG[0].name].cget("command")()
+    expected = build_receipt(app.cart, serial_driver.Receipt, include_logo=False, include_barcode=False)
+
+    app.print_button.cget("command")()
+
+    assert sent["data"] == expected
+    app.include_logo_checkbox.select()
+    app.include_barcode_checkbox.select()
+
+
+def test_print_failure_shows_error_and_leaves_cart_intact(app, monkeypatch):
+    def failing_send(data, chosen_transport, port=None, baud=None):
+        raise transport.TransportError("Serial error on COM9: device not found")
+
+    monkeypatch.setattr(transport, "send", failing_send)
+
+    app.product_buttons[CATALOG[0].name].cget("command")()
+    app.print_button.cget("command")()
+
+    feedback = app.feedback_label.cget("text")
+    assert "fail" in feedback.lower()
+    assert "device not found" in feedback.lower()
+    assert len(app.cart.lines()) == 1
+    assert app.cart.lines()[0].name == CATALOG[0].name
+
+
+def test_print_over_usb_sends_receipt_built_with_usb_driver_and_clears_cart(app, monkeypatch):
+    sent = {}
+
+    def fake_send(data, chosen_transport, port=None, baud=None):
+        sent["data"] = data
+        sent["transport"] = chosen_transport
+
+    monkeypatch.setattr(transport, "send", fake_send)
+    monkeypatch.setattr(transport, "usb_is_connected", lambda: True)
+
+    app.transport_toggle.set("USB")
+    app._on_transport_changed("USB")
+    app.product_buttons[CATALOG[0].name].cget("command")()
+    expected = build_receipt(app.cart, usb_driver.Receipt, include_logo=True, include_barcode=True)
+
+    app.print_button.cget("command")()
+
+    assert sent["data"] == expected
+    assert sent["transport"] is transport.Transport.USB
+    assert "success" in app.feedback_label.cget("text").lower()
+    assert app.cart.lines() == []

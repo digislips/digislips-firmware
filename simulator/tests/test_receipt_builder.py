@@ -6,6 +6,16 @@ from cart import Cart, Product
 from receipt_builder import build_receipt
 
 
+@pytest.mark.parametrize("receipt_cls", [serial_driver.Receipt, usb_driver.Receipt])
+def test_receipt_feeds_and_cuts_at_the_end(receipt_cls):
+    cart = Cart()
+    cart.add(Product("Sourdough Bread 800g", 62.99))
+
+    buf = build_receipt(cart, receipt_cls)
+
+    assert buf.endswith(serial_driver.GS + b'\x56\x00')
+
+
 def test_item_rows_reflect_name_qty_and_price():
     cart = Cart()
     cart.add(Product("Sourdough Bread 800g", 62.99))

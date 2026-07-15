@@ -34,14 +34,20 @@ DEFAULT_ENC    = "cp437"
 
 
 # ── USB send ───────────────────────────────────────────────────────────────────
-def find_vendor_bulk_out_endpoint(dev):
-    """Scan every interface in the active config for a vendor-class (FFh) bulk
-    OUT endpoint, instead of assuming it's interface 0 -- on a composite
-    device (e.g. CDC + Vendor on the RP2040-Zero bridge board) the vendor
-    interface can land at any index."""
+USB_PRINTER_CLASS = 0x07
+VENDOR_CLASS = 0xFF
+
+
+def find_bulk_out_endpoint(dev):
+    """Scan every interface in the active config for a bulk OUT endpoint,
+    instead of assuming it's interface 0 -- on a composite device (e.g. CDC +
+    Vendor on the RP2040-Zero bridge board) the relevant interface can land
+    at any index. Accepts either a vendor-class (FFh) interface (the bridge
+    board) or a standard USB-printer-class (07h) interface (real thermal
+    printers, which Windows recognizes and binds usbprint.sys to)."""
     cfg = dev.get_active_configuration()
     for intf in cfg:
-        if intf.bInterfaceClass != 0xFF:
+        if intf.bInterfaceClass not in (USB_PRINTER_CLASS, VENDOR_CLASS):
             continue
         ep = usb.util.find_descriptor(
             intf,
@@ -68,11 +74,18 @@ def print_raw_usb(data: bytes) -> None:
     except NotImplementedError:
         pass
 
-    dev.set_configuration()
-    ep = find_vendor_bulk_out_endpoint(dev)
+    try:
+        dev.set_configuration()
+    except (usb.core.USBError, NotImplementedError) as e:
+        print(f"[ERROR] Could not open USB device: {e}")
+        print("  -> Windows is likely using its built-in printer driver (usbprint.sys) for this device")
+        print("  -> Install WinUSB for this device via Zadig, then unplug/replug")
+        return
+
+    ep = find_bulk_out_endpoint(dev)
 
     if ep is None:
-        print("[ERROR] Could not find a vendor-class (FFh) USB OUT endpoint")
+        print("[ERROR] Could not find a USB OUT endpoint on a printer-class or vendor-class interface")
         return
 
     try:
