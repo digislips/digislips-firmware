@@ -1,0 +1,4 @@
+pyserial
+pyusb
+Pillow
+customtkinter
