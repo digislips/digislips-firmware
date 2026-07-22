@@ -119,6 +119,10 @@ TFT_eSPI tft = TFT_eSPI();
 
 // Touch — CST826 capacitive controller on internal I2C bus
 #define TOUCH_ADDR 0x15
+// Raw touch axes are fixed to the physical glass and don't follow tft.setRotation();
+// flip these to re-align hit-testing after a display rotation change.
+#define TOUCH_INVERT_X 1
+#define TOUCH_INVERT_Y 1
 
 // QR screen button geometry — shared between drawQR() and loop() hit-test
 #define BTN_PRINT_X 40
@@ -413,6 +417,12 @@ bool readTouch(int16_t& x, int16_t& y) {
   if (buf[2] == 0) return false;
   x = ((uint16_t)(buf[3] & 0x0F) << 8) | buf[4];
   y = ((uint16_t)(buf[5] & 0x0F) << 8) | buf[6];
+#if TOUCH_INVERT_X
+  x = SCREEN_WIDTH - 1 - x;
+#endif
+#if TOUCH_INVERT_Y
+  y = SCREEN_HEIGHT - 1 - y;
+#endif
   return true;
 }
 
@@ -1449,9 +1459,9 @@ void setup() {
 
   // ── TFT display ─────────────────────────────────────────────────────────────
   tft.init();
-  tft.setRotation(0);  // portrait — 320 wide, 480 tall
+  tft.setRotation(2);  // portrait, rotated 180° — 320 wide, 480 tall (try 0 if flip is wrong)
   displayBoot(0);
-  Serial.println("[TFT] OK — ST7796 320x480 portrait");
+  Serial.println("[TFT] OK — ST7796 320x480 portrait (180°)");
 
   // ── I2C — Grove I2C connector ───────────────────────────────────────────────
   // Bus recovery before Wire.begin() frees any device holding SDA low
