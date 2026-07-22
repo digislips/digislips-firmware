@@ -1040,7 +1040,33 @@ void parseESCPOS(uint8_t* buf, int len) {
     } else if (b == 0x1D) {
       i++;
       if (i < len) {
-        i += 2;
+        uint8_t gsCmd = buf[i];
+        if (gsCmd == 0x76 && i + 1 < len && buf[i + 1] == 0x30) {
+          // GS v 0 m xL xH yL yH <bitmap data> — raster bit image (logo).
+          // Fixed-length skip misreads bitmap bytes as text; must skip the
+          // full computed payload instead.
+          if (i + 6 < len) {
+            int bytesPerRow = buf[i + 3] | (buf[i + 4] << 8);
+            int rows        = buf[i + 5] | (buf[i + 6] << 8);
+            i += 7 + (bytesPerRow * rows);
+          } else {
+            i = len;
+          }
+        } else if (gsCmd == 0x6B) {
+          // GS k m [n d1..dn]  (function B, m>=65, explicit length byte)
+          // or  GS k m d1..dn NUL  (function A, NUL-terminated) — barcode.
+          uint8_t m = (i + 1 < len) ? buf[i + 1] : 0;
+          if (m >= 65 && i + 2 < len) {
+            uint8_t n = buf[i + 2];
+            i += 3 + n;
+          } else {
+            int j = i + 2;
+            while (j < len && buf[j] != 0x00) j++;
+            i = (j < len) ? j + 1 : len;
+          }
+        } else {
+          i += 2;
+        }
       }
     } else if (b == 0x0A || b == 0x0D) {
       currentLine.trim();
