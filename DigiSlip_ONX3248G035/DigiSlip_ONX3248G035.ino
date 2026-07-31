@@ -39,6 +39,11 @@
 //    time.h                  — built-in NTP / SNTP
 // =============================================================================
 
+// Hardware SKU selector — set to 0 to build a QR-only unit (no PN532 attached).
+// Default 1 reproduces today's full NFC + QR claim behavior unchanged. Must be
+// defined before the Adafruit_PN532.h include below.
+#define HAS_NFC_READER 1
+
 #include <Wire.h>
 #include <WiFi.h>
 #include <WiFiManager.h>
@@ -46,7 +51,9 @@
 #include <HTTPClient.h>
 #include <HTTPUpdate.h>
 #include <TFT_eSPI.h>  // gfxfont.h (pulled in by TFT_eSPI) already includes all FreeFonts
+#if HAS_NFC_READER
 #include <Adafruit_PN532.h>
+#endif
 #include <QRCodeGenerator.h>
 #include <ArduinoJson.h>
 #include <Preferences.h>
@@ -67,7 +74,7 @@
 #define MIN_SLIP_BYTES 16
 
 // Firmware version — must match the GitHub release tag exactly (e.g. "v2.3.0")
-#define FIRMWARE_VERSION "v2.6.0"
+#define FIRMWARE_VERSION "v2.7.0"
 
 // =============================================================================
 //  ── PIN DEFINITIONS — ONX3248G035 ───────────────────────────────────────────
@@ -135,7 +142,9 @@ TFT_eSPI tft = TFT_eSPI();
 #define BTN_CANCEL_H 38
 
 // NFC reader on I2C Grove connector
+#if HAS_NFC_READER
 Adafruit_PN532 nfc(I2C_SDA, I2C_SCL);
+#endif
 
 Preferences prefs;  // NVS storage
 
@@ -756,7 +765,11 @@ void drawQR(const char* text) {
 
   // Caption below card
   tft.setTextColor(COL_MUTED, COL_BG);
+#if HAS_NFC_READER
   tft.drawString("SCAN QR OR TAP NFC", SCREEN_WIDTH / 2, cardY + cardH + 18);
+#else
+  tft.drawString("SCAN QR CODE", SCREEN_WIDTH / 2, cardY + cardH + 18);
+#endif
 
   // Print button
   tft.fillRoundRect(BTN_PRINT_X, BTN_PRINT_Y, BTN_PRINT_W, BTN_PRINT_H, 10, COL_GREEN);
@@ -1489,6 +1502,7 @@ void setup() {
   Serial.println("[I2C] SDA=IO8 SCL=IO7 @ 400kHz");
 
   // ── NFC ─────────────────────────────────────────────────────────────────────
+#if HAS_NFC_READER
   nfc.begin();
   uint32_t nfcVer = nfc.getFirmwareVersion();
   if (!nfcVer) {
@@ -1498,6 +1512,7 @@ void setup() {
   Serial.printf("[NFC] PN532 v%d.%d\n",
                 (nfcVer >> 16) & 0xFF, (nfcVer >> 8) & 0xFF);
   nfc.SAMConfig();
+#endif
 
   // ── UART1 — Grove UART connector (POS RX + Printer TX) ──────────────────────
   // Both directions on the same UART — IO12=RX from POS, IO13=TX to Printer
@@ -1720,6 +1735,7 @@ void loop() {
         }
 
         // 3. NFC tap
+#if HAS_NFC_READER
         uint8_t uid[7];
         uint8_t uidLen = 0;
         if (nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLen, 50)) {
@@ -1751,6 +1767,7 @@ void loop() {
           currentState = STATE_CLAIMED;
           break;
         }
+#endif
 
         // 5. Timeout — silent return to IDLE (digital slip unaffected, 24h expiry applies)
         if (elapsed >= CLAIM_TIMEOUT_MS) {

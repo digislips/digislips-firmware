@@ -735,3 +735,120 @@ def test_no_credentials_in_sketch():
     wifi_inline_pattern = r'WIFI_PASSWORD\s*=\s*"[^"]+'
     assert not re.search(wifi_inline_pattern, SOURCE), \
         "WIFI_PASSWORD assigned inline in sketch source"
+
+
+# =============================================================================
+#  Issue #41 — QR-only device variant (HAS_NFC_READER compile flag)
+# =============================================================================
+
+# ── Behavior 1: flag exists and defaults to 1 ─────────────────────────────────
+
+def test_has_nfc_reader_flag_defaults_to_1():
+    assert re.search(r"#define\s+HAS_NFC_READER\s+1\b", SOURCE), \
+        "#define HAS_NFC_READER 1 not found near top of sketch"
+
+
+# ── Behavior 2: PN532 include + nfc instance guarded ──────────────────────────
+
+def test_pn532_include_guarded():
+    assert re.search(
+        r"#if\s+HAS_NFC_READER\s*\n#include\s*<Adafruit_PN532\.h>\s*\n#endif",
+        SOURCE), \
+        "#include <Adafruit_PN532.h> is not wrapped in #if HAS_NFC_READER / #endif"
+
+
+def test_pn532_instance_guarded():
+    assert re.search(
+        r"#if\s+HAS_NFC_READER\s*\nAdafruit_PN532\s+nfc\s*\([^)]*\)\s*;\s*\n#endif",
+        SOURCE), \
+        "Adafruit_PN532 nfc(...) instance is not wrapped in #if HAS_NFC_READER / #endif"
+
+
+# ── Behavior 3: setup() PN532 init block guarded ──────────────────────────────
+
+def test_setup_nfc_init_guarded():
+    m = re.search(r"void\s+setup\s*\(\s*\)\s*\{(.*?)\n\}", SOURCE, re.DOTALL)
+    assert m, "Could not locate setup()"
+    body = m.group(1)
+    m2 = re.search(
+        r"#if\s+HAS_NFC_READER(.*?)#endif",
+        body, re.DOTALL)
+    assert m2, "No #if HAS_NFC_READER / #endif block found in setup()"
+    guarded = m2.group(1)
+    assert "nfc.begin()" in guarded, "nfc.begin() not inside guarded block in setup()"
+    assert "getFirmwareVersion()" in guarded, \
+        "getFirmwareVersion() check not inside guarded block in setup()"
+    assert "PN532 not found" in guarded, \
+        "\"PN532 not found\" log not inside guarded block in setup()"
+    assert "nfc.SAMConfig()" in guarded, \
+        "nfc.SAMConfig() not inside guarded block in setup()"
+
+
+# ── Behavior 4: loop's NFC tap-poll block guarded ─────────────────────────────
+
+def test_waiting_claim_nfc_tap_guarded():
+    body = _waiting_claim_body()
+    m = re.search(r"#if\s+HAS_NFC_READER(.*?)#endif", body, re.DOTALL)
+    assert m, "No #if HAS_NFC_READER / #endif block found in STATE_WAITING_CLAIM"
+    guarded = m.group(1)
+    assert "nfc.readPassiveTargetID(" in guarded, \
+        "nfc.readPassiveTargetID() not inside guarded block in STATE_WAITING_CLAIM"
+    assert "supabaseNfcClaim(" in guarded, \
+        "supabaseNfcClaim() call not inside guarded block in STATE_WAITING_CLAIM"
+    assert "CLAIM_NFC" in guarded, \
+        "CLAIM_NFC assignment not inside guarded block in STATE_WAITING_CLAIM"
+
+
+# ── Behavior 5: QR caption gated by #if/#else/#endif with both literals ──────
+
+def test_qr_caption_gated_by_has_nfc_reader():
+    body = _qr_body()
+    m = re.search(
+        r'#if\s+HAS_NFC_READER\s*(.*?)#else\s*(.*?)#endif',
+        body, re.DOTALL)
+    assert m, "QR caption not gated by #if HAS_NFC_READER / #else / #endif in drawQR()"
+    on_branch, off_branch = m.group(1), m.group(2)
+    assert "SCAN QR OR TAP NFC" in on_branch, \
+        "\"SCAN QR OR TAP NFC\" not in #if HAS_NFC_READER branch"
+    assert "SCAN QR CODE" in off_branch, \
+        "\"SCAN QR CODE\" not in #else branch"
+
+
+# ── Behavior 6: unguarded touch points remain unguarded ───────────────────────
+
+UNGUARDED_SYMBOLS = [
+    "drawNfcLinking",
+    "drawUnregisteredCard",
+    "supabaseNfcClaim",
+    "CLAIM_NFC",
+    "nfcUID",
+]
+
+def test_unguarded_symbols_not_wrapped_in_has_nfc_reader():
+    # None of these definitions should be newly wrapped in #if HAS_NFC_READER.
+    # (CLAIM_NFC / supabaseNfcClaim / nfcUID legitimately still appear *inside*
+    # the guarded loop block from Behavior 4 above — that's expected and fine.
+    # This test targets their *definitions*, which must stay unguarded.)
+    def_patterns = {
+        "drawNfcLinking": r"void\s+drawNfcLinking\s*\(",
+        "drawUnregisteredCard": r"void\s+drawUnregisteredCard\s*\(",
+        "supabaseNfcClaim": r"bool\s+supabaseNfcClaim\s*\(",
+        "CLAIM_NFC": r"CLAIM_NFC\s*,",
+        "nfcUID": r"String\s+nfcUID\s*=",
+    }
+    for name, pattern in def_patterns.items():
+        m = re.search(pattern, SOURCE)
+        assert m, f"Could not locate definition for {name}"
+        preceding = SOURCE[:m.start()]
+        last_if = preceding.rfind("#if")
+        last_endif = preceding.rfind("#endif")
+        assert last_endif >= last_if, \
+            f"{name} definition appears inside an unclosed #if block — should remain unguarded"
+
+
+def test_claim_method_enum_keeps_all_three_values():
+    m = re.search(r"enum\s+ClaimMethod\s*\{(.*?)\}", SOURCE, re.DOTALL)
+    assert m, "Could not locate ClaimMethod enum"
+    body = m.group(1)
+    for value in ["CLAIM_NONE", "CLAIM_NFC", "CLAIM_QR"]:
+        assert value in body, f"ClaimMethod enum missing {value}"
