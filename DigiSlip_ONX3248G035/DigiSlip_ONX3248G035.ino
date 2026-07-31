@@ -42,7 +42,7 @@
 // Hardware SKU selector — set to 0 to build a QR-only unit (no PN532 attached).
 // Default 1 reproduces today's full NFC + QR claim behavior unchanged. Must be
 // defined before the Adafruit_PN532.h include below.
-#define HAS_NFC_READER 1
+#define HAS_NFC_READER 0
 
 #include <Wire.h>
 #include <WiFi.h>
